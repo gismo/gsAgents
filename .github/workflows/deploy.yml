@@ -38,21 +38,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MESSAGE: "build: update ${{ matrix.provider }} agents"
 
-      - name: Create Release Artifacts
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # Create zip file for each provider
-          cd output/.${{ matrix.provider }}/agents
-          zip -r agents-${{ matrix.provider }}.zip ./*
+      # - name: Create Release Artifacts
+      #   if: github.ref == 'refs/heads/main'
+      #   run: |
+      #     # Create zip file for each provider
+      #     cd output/.${{ matrix.provider }}/agents
+      #     zip -r agents-${{ matrix.provider }}.zip ./*
           
-          # Upload as artifacts
-          cd ../..
-          ls -la
+      #     # Upload as artifacts
+      #     cd ../..
+      #     ls -la
           
-      - name: Upload Release Artifacts
-        uses: actions/upload-artifact@v3
-        if: github.ref == 'refs/heads/main'
-        with:
-          name: agents-${{ matrix.provider }}-${{ github.sha }}
-          path: output/.${{ matrix.provider }}/agents/agents-${{ matrix.provider }}.zip
-          retention-days: 30
+      # - name: Upload Release Artifacts
+      #   uses: actions/upload-artifact@v3
+      #   if: github.ref == 'refs/heads/main'
+      #   with:
+      #     name: agents-${{ matrix.provider }}-${{ github.sha }}
+      #     path: output/.${{ matrix.provider }}/agents/agents-${{ matrix.provider }}.zip
+      #     retention-days: 30
