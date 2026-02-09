@@ -253,6 +253,15 @@ def write_agent_output(agent_name, content, provider):
     output_file.write_text(content)
     print(f"  Written: {output_file}")
 
+    # Create manifest entry
+    manifest_file = agents_dir / "manifest.txt"
+    if not manifest_file.exists():
+        manifest_file.write_text(f"{agent_name}\n")
+    else:
+        current_content = manifest_file.read_text().strip()
+        if agent_name not in current_content:
+            manifest_file.write_text(f"{current_content}\n{agent_name}\n")
+
 
 def write_skill_output(skill_name, content, provider):
     """Write compiled skill to output directory."""
