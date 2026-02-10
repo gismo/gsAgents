@@ -1,0 +1,5 @@
+my-skill
+my-skill/SKILL.md
+my-skill/examples.md
+my-skill/reference.md
+my-skill/scripts/script.py
