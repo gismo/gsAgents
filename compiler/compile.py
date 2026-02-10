@@ -289,8 +289,9 @@ def write_command_output(command_name, content, provider):
 def write_skill_output(skill_name, content, provider):
     """Write compiled skill to output directory."""
     provider_dir = PROVIDER_PATHS[provider]
-    # Place SKILL.md in output/.provider/<skill-name>/SKILL.md
-    skill_dir = provider_dir / skill_name
+    # Place SKILL.md in output/.provider/skills/<skill-name>/SKILL.md
+    skills_root = provider_dir / "skills"
+    skill_dir = skills_root / skill_name
     skill_dir.mkdir(parents=True, exist_ok=True)
 
     output_file = skill_dir / "SKILL.md"
@@ -302,8 +303,8 @@ def write_skill_output(skill_name, content, provider):
     # (Actual copying of other files is handled by add_skill_files)
 
     # Add skill directory name to manifest
-    # Write a simple manifest listing skills for this provider
-    manifest_file = provider_dir / "manifest.txt"
+    # Write a simple manifest listing skills for this provider (per-skills dir)
+    manifest_file = skills_root / "manifest.txt"
     if not manifest_file.exists():
         manifest_file.write_text(f"{skill_name}\n")
     else:
@@ -382,6 +383,37 @@ def compile_agent(agent_file, providers=None):
     return True
 
 
+def compile_command(command_file, providers=None):
+    """Compile a single command file."""
+    print(f"\nCompiling command: {command_file.name}")
+
+    # Load and validate
+    command_data = json.loads(command_file.read_text())
+    schema = load_schema("command.schema.json")
+
+    if not validate_json(command_data, schema):
+        print(f"  Error: Validation failed for {command_file.name}")
+        return False
+
+    command_name = command_data.get("name")
+    if not command_name:
+        print(f"  Error: Command name not found in {command_file.name}")
+        return False
+
+    # Compile for each provider
+    providers_to_compile = providers or ["claude", "opencode", "copilot"]
+    compiled_count = 0
+
+    for provider in providers_to_compile:
+        content = compile_command_for_provider(command_data, provider)
+        if content:
+            write_command_output(command_name, content, provider)
+            compiled_count += 1
+
+    print(f"  Compiled to {compiled_count} provider(s)")
+    return True
+
+
 def compile_skill(skill_file, providers=None):
     """Compile a single skill file."""
     print(f"\nCompiling skill: {skill_file.name}")
@@ -421,52 +453,31 @@ def compile_all_agents(providers=None):
         return
 
     agent_files = list(AGENTS_DIR.glob("*.json"))
-
-    # Compile agents
     print("\n=== Compiling All Agents ===")
     success_count = 0
+    total = len(agent_files)
     for agent_file in agent_files:
         if compile_agent(agent_file, providers):
             success_count += 1
 
-    # Compile commands separately
-    command_files = []
-    if COMMANDS_DIR.exists():
-        command_files = list(COMMANDS_DIR.glob("*.json"))
+    print(f"\n✓ Compiled {success_count}/{total} agents")
 
-    total_commands = len(command_files)
-    command_success = 0
-    if total_commands > 0:
-        print("\n=== Compiling All Commands ===")
-        for cmd_file in command_files:
-            print(f"\nCompiling command: {cmd_file.name}")
-            try:
-                cmd_data = json.loads(cmd_file.read_text())
-            except json.JSONDecodeError as e:
-                print(f"  Error: JSON decode error in {cmd_file.name}: {e}")
-                continue
-            # Validate with command schema
-            schema = load_schema("command.schema.json")
-            if not validate_json(cmd_data, schema):
-                print(f"  Error: Validation failed for {cmd_file.name}")
-                continue
 
-            cmd_name = cmd_data.get("name")
-            if not cmd_name:
-                print(f"  Error: Command name not found in {cmd_file.name}")
-                continue
+def compile_all_commands(providers=None):
+    """Compile all commands in the commands directory."""
+    if not COMMANDS_DIR.exists():
+        print(f"Commands directory not found: {COMMANDS_DIR}")
+        return
 
-            for provider in providers or ["claude", "opencode", "copilot"]:
-                content = compile_command_for_provider(cmd_data, provider)
-                if content:
-                    write_command_output(cmd_name, content, provider)
-                    command_success += 1
+    command_files = list(COMMANDS_DIR.glob("*.json"))
+    print("\n=== Compiling All Commands ===")
+    success_count = 0
+    total = len(command_files)
+    for command_file in command_files:
+        if compile_command(command_file, providers):
+            success_count += 1
 
-    total = len(agent_files) + total_commands
-    print(f"\n✓ Compiled {success_count}/{len(agent_files)} agents")
-    if total_commands > 0:
-        print(f"✓ Compiled {command_success}/{total_commands} commands")
-    print(f"\n✓ Compiled {success_count + command_success}/{total} agents+commands")
+    print(f"\n✓ Compiled {success_count}/{total} commands")
 
 
 def compile_all_skills(providers=None):
@@ -477,9 +488,10 @@ def compile_all_skills(providers=None):
 
     print("\n=== Compiling All Skills ===")
     # New layout: each skill is a subdirectory under skills/<skill-name>/
+    # Expect the JSON descriptor inside the subdirectory (e.g. skills/my-skill/my-skill.json)
     skill_dirs = [p for p in SKILLS_DIR.iterdir() if p.is_dir()]
 
-    # Fallback: allow legacy JSON files directly in SKILLS_DIR
+    # Fallback: allow legacy JSON files directly in SKILLS_DIR (kept for compatibility)
     legacy_jsons = list(SKILLS_DIR.glob("*.json"))
 
     total = len(skill_dirs) + len(legacy_jsons)
@@ -491,10 +503,10 @@ def compile_all_skills(providers=None):
 
     # Compile skills found as subdirectories
     for sd in skill_dirs:
-        # Prefer <skilldir>/<skilldir>.json if present, otherwise first .json
+        # Prefer <skilldir>/<skilldir>.json or the first .json found inside the directory
         json_candidates = list(sd.glob("*.json"))
         if not json_candidates:
-            print(f"  Skipping {sd.name}: no .json descriptor found")
+            print(f"  Skipping {sd.name}: no .json descriptor found inside directory")
             continue
         preferred = sd / f"{sd.name}.json"
         if preferred.exists():
@@ -502,6 +514,7 @@ def compile_all_skills(providers=None):
         else:
             skill_file = json_candidates[0]
 
+        # compile_skill expects a Path to the JSON file; pass it through
         if compile_skill(skill_file, providers):
             success_count += 1
 
@@ -624,16 +637,26 @@ Examples:
 
     # Compile specific skill
     if args.skill:
+        # Support two layouts:
+        # 1) legacy: skills/<skill>.json
+        # 2) new: skills/<skill>/<skill>.json
         skill_file = SKILLS_DIR / f"{args.skill}.json"
         if not skill_file.exists():
-            print(f"Error: Skill not found: {skill_file}")
-            sys.exit(1)
+            alt = SKILLS_DIR / args.skill / f"{args.skill}.json"
+            if alt.exists():
+                skill_file = alt
+            else:
+                print(f"Error: Skill not found: {skill_file} or {alt}")
+                sys.exit(1)
         compile_skill(skill_file, providers)
         return
 
     # Compile all
     if args.all or args.agents_only:
         compile_all_agents(providers)
+
+    if args.all or args.commands_only:
+        compile_all_commands(providers)
 
     if args.all or args.skills_only:
         compile_all_skills(providers)
