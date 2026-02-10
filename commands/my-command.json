@@ -1,0 +1,8 @@
+{
+    "name": "my-command",
+    "description": "Example command.",
+    "prompt": "This command does nothing",
+    "OPTIONALagent": "code-reviewer",
+    "OPTIONALsubtask": "true",
+    "OPTIONALmodel:": "NA"
+}

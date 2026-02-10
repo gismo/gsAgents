@@ -48,26 +48,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MESSAGE: "build: update ${{ matrix.provider }} agents"
 
-      - name: Cleanup old agent branches
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          REPO: ${{ github.repository }}
-          KEEP_BRANCH: "agents-${{ matrix.provider }}"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          echo "Cleaning up remote branches matching agents-* except ${KEEP_BRANCH}"
-          remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
-          # list remote branches matching agents-*
-          git ls-remote --heads ${remote} "refs/heads/agents-*" \
-            | awk '{print $2}' | sed 's#refs/heads/##' | while read -r b; do
-              if [ "$b" != "${KEEP_BRANCH}" ]; then
-                echo "Deleting remote branch: $b"
-                git push ${remote} --delete "$b" || echo "Failed to delete $b"
-              else
-                echo "Keeping branch: $b"
-              fi
-            done
+      # cleanup of old branches is performed in a dedicated job after the matrix
 
       # - name: Create Release Artifacts
       #   if: github.ref == 'refs/heads/main'

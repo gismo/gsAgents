@@ -1,0 +1,63 @@
+name: Cleanup Old Agent Branches
+on:
+  workflow_run:
+    workflows: ["Sync Agent Providers"]
+    types: [completed]
+
+jobs:
+  cleanup:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cleanup old agent branches
+        env:
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Determine which providers were run in the parent workflow by reading its matrix
+          run_id=${{ github.event.workflow_run.id }}
+          echo "Parent workflow run id: ${run_id}"
+          # Query the workflow run jobs to find which matrix.providers completed
+          api_url="https://api.github.com/repos/${REPO}/actions/runs/${run_id}/jobs"
+          jobs_json=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "${api_url}")
+          providers=$(echo "$jobs_json" | python3 -c "import sys,json; j=json.load(sys.stdin); ps=[]
+          for job in j.get('jobs',[]):
+            name = job.get('name','')
+            # matrix provider shows up as part of the job name in this workflow
+            if 'provider' in job.get('labels',[]) or 'provider' in name:
+              # fallback: try to extract provider from labels or name
+              for l in job.get('labels',[]):
+                if l in ['claude','copilot','opencode']:
+                  ps.append(l)
+              if not ps and name:
+                for token in ['claude','copilot','opencode']:
+                  if token in name:
+                    ps.append(token)
+          print(' '.join(sorted(set(ps))))")
+          echo "Providers found: ${providers}"
+          if [ -z "${providers// /}" ]; then
+            echo "No providers discovered, aborting cleanup"
+            exit 0
+          fi
+          remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          for prov in ${providers}; do
+            keep=agents-${prov}
+            echo "Processing provider ${prov}, keeping ${keep}"
+            # Consider branches that are variants of the keep branch
+            git ls-remote --heads ${remote} "refs/heads/${keep}-*" \
+              | awk '{print $2}' | sed 's#refs/heads/##' > /tmp/agents_branches_${prov}.txt || true
+            if [ -s /tmp/agents_branches_${prov}.txt ]; then
+              while read -r b; do
+                echo "Deleting remote branch: $b"
+                git push ${remote} --delete "$b" || echo "Failed to delete $b"
+              done < /tmp/agents_branches_${prov}.txt
+            else
+              echo "No candidate branches to delete for ${prov}"
+            fi
+          done

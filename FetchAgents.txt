@@ -1,0 +1,33 @@
+# FetchAgents.txt
+# List of agent repositories used by CMake's FetchContent integration.
+#
+# Format:
+#   <id> <git-url> [revision=<branch|tag|commit>] [path=<subdir>]
+#
+# - <id> is a short identifier used in CMake to name the project when fetched.
+# - <git-url> is the HTTPS or SSH URL for the repository.
+# - revision= is optional and can be a branch, tag or commit hash.
+# - path= is optional and specifies a subdirectory within the repo to use.
+#
+# Example entries:
+#   agent-core https://github.com/example/agent-core.git revision=v1.2.0
+#   utils https://github.com/example/agent-utils.git revision=main path=cmake
+#
+# Notes for CMake usage:
+# - A small helper CMake script can parse this file and call FetchContent_Declare
+#   for each line, passing the URL and GIT_TAG (from revision=) and optionally
+#   the SOURCE_SUBDIR if path= is provided.
+# - Keep this file in the project root (or point CMake at it) and update when
+#   adding/removing agents.
+
+# --- Begin agent list (edit below) ---
+# Placeholder entries — replace with real repos used by your project.
+agent-core https://github.com/example/agent-core.git revision=main
+agent-utils https://github.com/example/agent-utils.git revision=v0.3.1 path=cmake
+agent-network https://github.com/example/agent-network.git revision=feature/cmake-integration
+
+# --- End agent list ---
+
+# If you want me to populate this file from an existing FetchAgents.txt
+# somewhere else (for example: ~/Code/gismo_worktrees/worktrees/agents/cmake/),
+# paste the file contents or allow me to read that path and I'll copy the entries.
