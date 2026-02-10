@@ -1,0 +1,13 @@
+{
+    "name": "my-skill",
+    "description": "What this skill does",
+    "prompt": "Your skill instructions here...",
+    "allowed-tools": ["Read", "Grep"],
+    "OPTIONALargument-hint": "NA",
+    "OPTIONALdisable-model-invocation": false,
+    "OPTIONALuser-invocable": false,
+    "OPTIONALmodel": "NA",
+    "OPTIONALcontext": "NA",
+    "OPTIONALagent": "NA",
+    "OPTIONALhooks": "NA"
+}

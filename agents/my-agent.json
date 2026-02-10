@@ -1,0 +1,18 @@
+{
+  "name": "my-agent",
+  "description": "Example agent.",
+  "prompt": "You are an example agent.\n You do nothing",
+  "tools": ["read"],
+  "permissions": {
+    "edit": "ask",
+    "bash": "ask"
+  },
+  "color": "blue",
+  "temperature": 0.7,
+  "providers": {
+    "claude": true,
+    "opencode": true,
+    "copilot": true,
+    "gemini": false
+  }
+}

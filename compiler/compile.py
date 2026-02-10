@@ -19,11 +19,13 @@ import os
 import sys
 from pathlib import Path
 from string import Template
+import shutil
 
 # Configuration
 BASE_DIR = Path(__file__).parent.parent
 AGENTS_DIR = BASE_DIR / "agents"
 SKILLS_DIR = BASE_DIR / "skills"
+COMMANDS_DIR = BASE_DIR / "commands"
 OUTPUT_DIR = BASE_DIR / "output"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 SCHEMA_DIR = Path(__file__).parent / "schema"
@@ -33,7 +35,6 @@ PROVIDER_PATHS = {
     "claude": OUTPUT_DIR / ".claude",
     "opencode": OUTPUT_DIR / ".opencode",
     "copilot": OUTPUT_DIR / ".github",
-    "gemini": OUTPUT_DIR / ".gemini",
 }
 
 
@@ -148,94 +149,100 @@ def format_mcp_servers_copilot(mcp_servers):
     return "\n".join(lines) + "\n"
 
 
-def compile_agent_for_provider(agent_data, provider):
-    """Compile agent data for a specific provider."""
+def _format_scalar(key, value):
+    """Format scalar value without quotes for bools/numbers, quote strings when needed."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return f"{key}: {str(value).lower()}\n"
+    if isinstance(value, (int, float)):
+        return f"{key}: {value}\n"
+    s = str(value)
+    if "\n" in s:
+        return f"{key}: |\n  " + "\n  ".join(s.splitlines()) + "\n"
+    # quote if contains colon or leading/trailing spaces
+    if ":" in s or s.strip() != s:
+        return f'{key}: "{s}"\n'
+    return f"{key}: {s}\n"
+
+
+def compile_entity_for_provider(entity_data, provider, template_type="agents"):
+    """Generic entity (agent/skill/command) compiler for a provider.
+
+    Produces a markdown string by populating provider-specific template with
+    a context built from entity_data. Re-uses existing formatters for tools,
+    permissions, handoffs and mcpServers.
+    """
     # Check if enabled for this provider
-    providers = agent_data.get("providers", {})
+    providers = entity_data.get("providers", {})
     if not providers.get(provider, True):
         return None
 
-    # Load template
     template_name = f"{provider}.md.j2"
-    template = load_template(template_name, template_type="agents")
+    template = load_template(template_name, template_type=template_type)
 
-    # Prepare context based on provider
+    # Base context
     context = {
-        "name": agent_data.get("name", ""),
-        "description": agent_data.get("description", ""),
-        "prompt": agent_data.get("prompt", ""),
+        "name": entity_data.get("name", ""),
+        "description": entity_data.get("description", ""),
+        "prompt": entity_data.get("prompt", ""),
     }
 
+    # Common properties and their section keys
+    # model, color, temperature, maxIterations, target
+    context["model_section"] = _format_scalar("model", entity_data.get("model"))
+    context["color_section"] = _format_scalar("color", entity_data.get("color"))
+    context["temperature_section"] = _format_scalar(
+        "temperature", entity_data.get("temperature")
+    )
+    # Note: templates expect max_iterations_section
+    context["max_iterations_section"] = _format_scalar(
+        "maxIterations", entity_data.get("maxIterations")
+    )
+    context["target_section"] = _format_scalar("target", entity_data.get("target"))
+
+    # Tools (provider specific formatting)
     if provider == "claude":
-        context["tools_section"] = format_tools_claude(agent_data.get("tools"))
-        context["model_section"] = (
-            f"model: {agent_data['model']}\n" if agent_data.get("model") else ""
-        )
-        context["color_section"] = (
-            f"color: {agent_data['color']}\n" if agent_data.get("color") else ""
-        )
-
+        context["tools_section"] = format_tools_claude(entity_data.get("tools"))
     elif provider == "opencode":
-        context["tools_section"] = format_tools_opencode(agent_data.get("tools"))
-        context["model_section"] = (
-            f"model: {agent_data['model']}\n" if agent_data.get("model") else ""
-        )
-        context["temperature_section"] = (
-            f"temperature: {agent_data['temperature']}\n"
-            if agent_data.get("temperature") is not None
-            else ""
-        )
-        context["max_iterations_section"] = (
-            f"maxIterations: {agent_data['maxIterations']}\n"
-            if agent_data.get("maxIterations")
-            else ""
-        )
-        context["permissions_section"] = format_permissions_opencode(
-            agent_data.get("permissions")
-        )
-
+        context["tools_section"] = format_tools_opencode(entity_data.get("tools"))
     elif provider == "copilot":
-        context["tools_section"] = format_tools_copilot(agent_data.get("tools"))
-        context["model_section"] = (
-            f"model: {agent_data['model']}\n" if agent_data.get("model") else ""
-        )
-        context["handoffs_section"] = format_handoffs_copilot(
-            agent_data.get("handoffs")
-        )
-        context["mcp_servers_section"] = format_mcp_servers_copilot(
-            agent_data.get("mcpServers")
-        )
-        context["target_section"] = (
-            f"target: {agent_data['target']}\n" if agent_data.get("target") else ""
-        )
+        context["tools_section"] = format_tools_copilot(entity_data.get("tools"))
+    else:
+        context["tools_section"] = ""
 
-    elif provider == "gemini":
-        # Gemini doesn't support agents in the same way
-        return None
+    # Permissions (opencode)
+    context["permissions_section"] = (
+        format_permissions_opencode(entity_data.get("permissions"))
+        if provider == "opencode"
+        else ""
+    )
+
+    # Handoffs and mcpServers (copilot)
+    context["handoffs_section"] = (
+        format_handoffs_copilot(entity_data.get("handoffs"))
+        if provider == "copilot"
+        else ""
+    )
+    context["mcp_servers_section"] = (
+        format_mcp_servers_copilot(entity_data.get("mcpServers"))
+        if provider == "copilot"
+        else ""
+    )
 
     return template.substitute(context)
+
+
+def compile_agent_for_provider(agent_data, provider):
+    return compile_entity_for_provider(agent_data, provider, template_type="agents")
 
 
 def compile_skill_for_provider(skill_data, provider):
-    """Compile skill data for a specific provider."""
-    # Check if enabled for this provider
-    providers = skill_data.get("providers", {})
-    if not providers.get(provider, True):
-        return None
+    return compile_entity_for_provider(skill_data, provider, template_type="skills")
 
-    # Load template
-    template = load_template("skill.md.j2", template_type="skills")
 
-    # Prepare context
-    context = {
-        "name": skill_data.get("name", ""),
-        "description": skill_data.get("description", ""),
-        "instructions": skill_data.get("instructions", ""),
-        "version": skill_data.get("version", "1.0.0"),
-        "tags": ", ".join(skill_data.get("tags", [])),
-    }
-
-    return template.substitute(context)
+def compile_command_for_provider(command_data, provider):
+    return compile_entity_for_provider(command_data, provider, template_type="agents")
 
 
 def write_agent_output(agent_name, content, provider):
@@ -246,7 +253,6 @@ def write_agent_output(agent_name, content, provider):
 
     # File extension
     output_file = agents_dir / f"{agent_name}.md"
-
     output_file.write_text(content)
     print(f"  Written: {output_file}")
 
@@ -260,33 +266,89 @@ def write_agent_output(agent_name, content, provider):
             manifest_file.write_text(f"{current_content}\n{agent_name}\n")
 
 
-def write_skill_output(skill_name, content, provider):
-    """Write compiled skill to output directory."""
+def write_command_output(command_name, content, provider):
+    """Write compiled command to output directory (treat like agents)."""
     provider_dir = PROVIDER_PATHS[provider]
-    skills_dir = provider_dir / "skills" / skill_name
-    skills_dir.mkdir(parents=True, exist_ok=True)
+    commands_dir = provider_dir / "commands"
+    commands_dir.mkdir(parents=True, exist_ok=True)
 
-    output_file = skills_dir / "SKILL.md"
+    output_file = commands_dir / f"{command_name}.md"
     output_file.write_text(content)
     print(f"  Written: {output_file}")
 
-    # Create filename tracking file
-    filename_file = skills_dir / ".filename"
-    if not filename_file.exists():
-        filename_file.write_text("SKILL.md\n")
+    # Create/update manifest in commands/ directory
+    manifest_file = commands_dir / "manifest.txt"
+    if not manifest_file.exists():
+        manifest_file.write_text(f"{command_name}\n")
     else:
-        current_content = filename_file.read_text().strip()
-        if "SKILL.md" not in current_content:
-            filename_file.write_text(f"{current_content}\nSKILL.md\n")
+        current_content = manifest_file.read_text().strip()
+        if command_name not in current_content:
+            manifest_file.write_text(f"{current_content}\n{command_name}\n")
 
-    # Create skill manifest entry
-    skills_manifest = provider_dir / "skills" / "manifest.txt"
-    if not skills_manifest.exists():
-        skills_manifest.write_text(f"{skill_name}\n")
+
+def write_skill_output(skill_name, content, provider):
+    """Write compiled skill to output directory."""
+    provider_dir = PROVIDER_PATHS[provider]
+    # Place SKILL.md in output/.provider/<skill-name>/SKILL.md
+    skill_dir = provider_dir / skill_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+
+    output_file = skill_dir / "SKILL.md"
+    output_file.write_text(content)
+    print(f"  Written: {output_file}")
+
+    # Copy other files and folders from skill source directory (e.g., examples.md, reference.md, scripts/)
+
+    # (Actual copying of other files is handled by add_skill_files)
+
+    # Add skill directory name to manifest
+    # Write a simple manifest listing skills for this provider
+    manifest_file = provider_dir / "manifest.txt"
+    if not manifest_file.exists():
+        manifest_file.write_text(f"{skill_name}\n")
     else:
-        current_content = skills_manifest.read_text().strip()
+        current_content = manifest_file.read_text().strip()
         if skill_name not in current_content:
-            skills_manifest.write_text(f"{current_content}\n{skill_name}\n")
+            manifest_file.write_text(f"{current_content}\n{skill_name}\n")
+
+
+def add_skill_files(skill_name, provider):
+    """Copy non-compiled files from skills/<skill_name> to output/<provider>/skills/<skill_name>.
+
+    Skill directories contain a .json (which is compiled into SKILL.md) and
+    other artifacts (examples.md, reference.md, scripts/, ...) which should be
+    copied verbatim for the provider output. JSON files are skipped.
+    """
+    if provider not in PROVIDER_PATHS:
+        print(f"  Warning: Unknown provider '{provider}', skipping copying skill files")
+        return
+
+    src_dir = SKILLS_DIR / skill_name
+    if not src_dir.exists():
+        print(f"  Warning: Skill source directory not found: {src_dir}")
+        return
+
+    dest_dir = PROVIDER_PATHS[provider] / "skills" / skill_name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    for item in src_dir.iterdir():
+        # Skip the JSON source file (it's compiled, not copied)
+        if item.is_file() and item.suffix.lower() == ".json":
+            continue
+
+        dest_path = dest_dir / item.name
+        try:
+            if item.is_dir():
+                # If destination exists, remove and replace to keep output deterministic
+                if dest_path.exists():
+                    shutil.rmtree(dest_path)
+                shutil.copytree(item, dest_path)
+                print(f"  Copied directory: {item} -> {dest_path}")
+            else:
+                shutil.copy2(item, dest_path)
+                print(f"  Copied file: {item} -> {dest_path}")
+        except Exception as e:
+            print(f"  Warning: Failed to copy {item} -> {dest_path}: {e}")
 
 
 def compile_agent(agent_file, providers=None):
@@ -311,9 +373,6 @@ def compile_agent(agent_file, providers=None):
     compiled_count = 0
 
     for provider in providers_to_compile:
-        if provider == "gemini":
-            continue  # Skip gemini for agents
-
         content = compile_agent_for_provider(agent_data, provider)
         if content:
             write_agent_output(agent_name, content, provider)
@@ -341,16 +400,14 @@ def compile_skill(skill_file, providers=None):
         return False
 
     # Compile for each provider
-    providers_to_compile = providers or ["claude", "opencode", "gemini"]
+    providers_to_compile = providers or ["claude", "opencode"]
     compiled_count = 0
 
     for provider in providers_to_compile:
-        if provider == "copilot":
-            continue  # Skip copilot for skills
-
         content = compile_skill_for_provider(skill_data, provider)
         if content:
             write_skill_output(skill_name, content, provider)
+            add_skill_files(skill_name, provider)  # Copy additional skill files
             compiled_count += 1
 
     print(f"  Compiled to {compiled_count} provider(s)")
@@ -363,19 +420,53 @@ def compile_all_agents(providers=None):
         print(f"Agents directory not found: {AGENTS_DIR}")
         return
 
-    print("\n=== Compiling All Agents ===")
     agent_files = list(AGENTS_DIR.glob("*.json"))
 
-    if not agent_files:
-        print("No agent files found.")
-        return
-
+    # Compile agents
+    print("\n=== Compiling All Agents ===")
     success_count = 0
     for agent_file in agent_files:
         if compile_agent(agent_file, providers):
             success_count += 1
 
+    # Compile commands separately
+    command_files = []
+    if COMMANDS_DIR.exists():
+        command_files = list(COMMANDS_DIR.glob("*.json"))
+
+    total_commands = len(command_files)
+    command_success = 0
+    if total_commands > 0:
+        print("\n=== Compiling All Commands ===")
+        for cmd_file in command_files:
+            print(f"\nCompiling command: {cmd_file.name}")
+            try:
+                cmd_data = json.loads(cmd_file.read_text())
+            except json.JSONDecodeError as e:
+                print(f"  Error: JSON decode error in {cmd_file.name}: {e}")
+                continue
+            # Validate with command schema
+            schema = load_schema("command.schema.json")
+            if not validate_json(cmd_data, schema):
+                print(f"  Error: Validation failed for {cmd_file.name}")
+                continue
+
+            cmd_name = cmd_data.get("name")
+            if not cmd_name:
+                print(f"  Error: Command name not found in {cmd_file.name}")
+                continue
+
+            for provider in providers or ["claude", "opencode", "copilot"]:
+                content = compile_command_for_provider(cmd_data, provider)
+                if content:
+                    write_command_output(cmd_name, content, provider)
+                    command_success += 1
+
+    total = len(agent_files) + total_commands
     print(f"\n✓ Compiled {success_count}/{len(agent_files)} agents")
+    if total_commands > 0:
+        print(f"✓ Compiled {command_success}/{total_commands} commands")
+    print(f"\n✓ Compiled {success_count + command_success}/{total} agents+commands")
 
 
 def compile_all_skills(providers=None):
@@ -385,18 +476,41 @@ def compile_all_skills(providers=None):
         return
 
     print("\n=== Compiling All Skills ===")
-    skill_files = list(SKILLS_DIR.glob("*.json"))
+    # New layout: each skill is a subdirectory under skills/<skill-name>/
+    skill_dirs = [p for p in SKILLS_DIR.iterdir() if p.is_dir()]
 
-    if not skill_files:
-        print("No skill files found.")
+    # Fallback: allow legacy JSON files directly in SKILLS_DIR
+    legacy_jsons = list(SKILLS_DIR.glob("*.json"))
+
+    total = len(skill_dirs) + len(legacy_jsons)
+    if total == 0:
+        print("No skills found.")
         return
 
     success_count = 0
-    for skill_file in skill_files:
+
+    # Compile skills found as subdirectories
+    for sd in skill_dirs:
+        # Prefer <skilldir>/<skilldir>.json if present, otherwise first .json
+        json_candidates = list(sd.glob("*.json"))
+        if not json_candidates:
+            print(f"  Skipping {sd.name}: no .json descriptor found")
+            continue
+        preferred = sd / f"{sd.name}.json"
+        if preferred.exists():
+            skill_file = preferred
+        else:
+            skill_file = json_candidates[0]
+
         if compile_skill(skill_file, providers):
             success_count += 1
 
-    print(f"\n✓ Compiled {success_count}/{len(skill_files)} skills")
+    # Compile legacy json files located directly in SKILLS_DIR
+    for skill_file in legacy_jsons:
+        if compile_skill(skill_file, providers):
+            success_count += 1
+
+    print(f"\n✓ Compiled {success_count}/{total} skills")
 
 
 def validate_all():
