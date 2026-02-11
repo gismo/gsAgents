@@ -2,7 +2,7 @@
 ## FetchAgents.cmake
 ## This file is part of the gsAgent compiler.
 ##
-## Downloads agent instruction files from the remote gsAgents2 repository.
+## Downloads agent instruction files from the remote gsAgents repository.
 ## Output goes to the build directory: <build>/.provider/<type>/
 ## This keeps the source tree clean.
 ##
@@ -82,7 +82,7 @@ function(fetch_gismo_agents)
 
     # --- Get AGENTS.md ---
     if(GISMO_AGENTS_FORCE_DOWNLOAD OR NOT EXISTS "${CMAKE_BINARY_DIR}/AGENTS.md")
-        set(_base "https://raw.githubusercontent.com/gismo/gsAgents2/refs/heads/main/AGENTS.md")
+        set(_base "https://raw.githubusercontent.com/gismo/gsAgents/refs/heads/main/AGENTS.md")
         file(DOWNLOAD "${_base}" "${CMAKE_BINARY_DIR}/AGENTS.md" STATUS _st)
         list(GET _st 0 _code)
         if(NOT _code EQUAL 0)
@@ -103,7 +103,7 @@ function(fetch_gismo_agents)
                 continue()
             endif()
 
-            set(_base "https://raw.githubusercontent.com/gismo/gsAgents2/refs/heads/output-${_prov}/${_rel_path}")
+            set(_base "https://raw.githubusercontent.com/gismo/gsAgents/refs/heads/output-${_prov}/${_rel_path}")
             set(_manifest_file "${CMAKE_BINARY_DIR}/${_prov}_${_type}_manifest.txt")
             file(DOWNLOAD "${_base}/manifest.txt" "${_manifest_file}" STATUS _st)
             list(GET _st 0 _code)

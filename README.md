@@ -1,4 +1,4 @@
-[![Sync Agent Providers](https://github.com/gismo/gsAgents2/actions/workflows/deploy.yml/badge.svg)](https://github.com/gismo/gsAgents2/actions/workflows/deploy.yml)
+[![Sync Agent Providers](https://github.com/gismo/gsAgents/actions/workflows/deploy.yml/badge.svg)](https://github.com/gismo/gsAgents/actions/workflows/deploy.yml)
 
 # gsAgents - Multi-Provider Agent Compiler
 
