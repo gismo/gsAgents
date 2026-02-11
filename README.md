@@ -1,6 +1,6 @@
 [![Sync Agent Providers](https://github.com/gismo/gsAgents2/actions/workflows/deploy.yml/badge.svg)](https://github.com/gismo/gsAgents2/actions/workflows/deploy.yml)
 
-# gsAgent - Multi-Provider Agent Compiler
+# gsAgents - Multi-Provider Agent Compiler
 
 A unified agent and skill compilation system that transforms universal JSON configurations into provider-specific formats for Claude Code, OpenCode, GitHub Copilot, and Gemini CLI.
 
