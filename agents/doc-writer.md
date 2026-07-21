@@ -1,8 +1,8 @@
 ---
 name: doc-writer
-description: "Haiku agent for G+Smo documentation tasks: doxygen comments on existing code, tutorials, README/markdown updates. Cheapest tier — use for task specs that change no executable code. Invoke with the task-file path."
+description: "Sonnet agent for G+Smo documentation tasks: doxygen comments on existing code, tutorials, README/markdown updates. Cheapest tier — use for task specs that change no executable code. Invoke with the task-file path."
 tools: Read, Edit, Write, Grep, Glob, Bash, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: haiku
+model: sonnet
 color: purple
 ---
 

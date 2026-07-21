@@ -1,8 +1,8 @@
 ---
 name: test-writer
-description: "Sonnet agent that writes or extends G+Smo unit tests (UnitTest++ suites in unittests/ and optional/*/unittests/). Use for task specs whose deliverable is test code: new suites for new features, regression tests for fixed bugs, coverage extensions. Invoke with the task-file path."
+description: "Opus agent that writes or extends G+Smo unit tests (UnitTest++ suites in unittests/ and optional/*/unittests/). Use for task specs whose deliverable is test code: new suites for new features, regression tests for fixed bugs, coverage extensions. Invoke with the task-file path."
 tools: Read, Edit, Write, Grep, Glob, Bash, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: sonnet
+model: opus
 color: yellow
 ---
 
@@ -30,4 +30,4 @@ Never bare `make`, never pass `-j` yourself, never delete/reconfigure build dirs
 
 - Core map: `.claude/gismo-maps/library-map.md`
 - Modules: `.claude/gismo-maps/modules/<module>.md`
-- Still not enough? You may spawn the **haiku** explorer `gismo:indexer` (Agent tool) for cheap lookups ("which suite covers X", "signature of Y") — at most a couple per task. Never spawn any other agent type; if the spec stays ambiguous, report `RESULT: BLOCKED` instead of exploring further.
+- Still not enough? You may spawn the **sonnet** explorer `gismo:indexer` (Agent tool) for cheap lookups ("which suite covers X", "signature of Y") — at most a couple per task. Never spawn any other agent type; if the spec stays ambiguous, report `RESULT: BLOCKED` instead of exploring further.

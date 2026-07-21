@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Closed-loop execution of an approved G+Smo plan — the main session orchestrates cheap agents (sonnet implementers, sonnet reviewer, haiku helpers) that implement, self-verify, and get reviewed task by task, ending with a plan-conformance check. Use after plan approval for any multi-step change; pass the plan-file path or slug.
+description: Closed-loop execution of an approved G+Smo plan — the main session orchestrates cheaper agents (opus implementers, opus reviewer, sonnet helpers) that implement, self-verify, and get reviewed task by task, ending with a plan-conformance check. Use after plan approval for any multi-step change; pass the plan-file path or slug.
 argument-hint: "<plan-file-or-slug>"
 ---
 
@@ -16,7 +16,7 @@ Artifact formats (task specs, reports, reviews, directory layout) are defined in
   - `gismo:implementer` — library code in `src/`, `optional/*/src`
   - `gismo:test-writer` — UnitTest++ suites
   - `gismo:example-writer` — runnable drivers in `examples/`
-  - `gismo:doc-writer` — doxygen/tutorials/README (haiku, cheapest)
+  - `gismo:doc-writer` — doxygen/tutorials/README (sonnet, cheapest)
 - Mirror the tasks with TaskCreate (one native task per task file, files remain the source of truth). Confirm `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` succeeds before dispatching anything; if it fails, run `/gismo:dev-config` with the user.
 - **Preflight the context maps once, before dispatching.** The agents you spawn read
   `.claude/gismo-maps/library-map.md` and `.claude/gismo-maps/modules/<mod>.md`, which are
@@ -45,7 +45,7 @@ When every task has `VERDICT: PASS`:
 ## Cost discipline
 
 - You (the expensive model) touch: plan, task files, reviews of reviews, final conformance, summary. Everything else is dispatched.
-- Exploration questions that come up mid-run go to `gismo:indexer` (haiku) or the generated maps — not to your own file-reading spree.
+- Exploration questions that come up mid-run go to `gismo:indexer` (sonnet) or the generated maps — not to your own file-reading spree.
 - Exceptions where you may edit code yourself: a task failed 2 repair rounds; a trivial cross-task integration fix (< ~10 lines) found during final conformance. Anything larger becomes a new task file.
 
 ## Safety

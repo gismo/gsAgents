@@ -1,6 +1,6 @@
 ---
 name: plan
-description: G+Smo planning conventions — how to write a plan.md and decompose it into task files that cheap implementer agents can execute without discovery. Use at the end of plan mode for any multi-step G+Smo change, before invoking /gismo:implement.
+description: G+Smo planning conventions — how to write a plan.md and decompose it into task files that implementer agents can execute without discovery. Use at the end of plan mode for any multi-step G+Smo change, before invoking /gismo:implement.
 allowed-tools: Read, Write, Grep, Glob
 ---
 
@@ -17,7 +17,7 @@ Ground the plan in reality first:
 
 ## Decomposing into tasks
 
-The implementers are cheaper models — **the intelligence must be in the task file, not the agent**:
+The implementers execute without discovery — **the intelligence must be in the task file, not the agent**:
 
 - Size: one task = one coherent change an agent can hold in its head — a class + its instantiation files, a test suite, an example. Split anything requiring two kinds of expertise (code vs test vs example vs docs) into separate tasks for the matching agent type.
 - Zero-discovery rule: every file path, every function to call, every pattern to imitate ("do it like `gsFoo::bar` in src/gsX/gsFoo.hpp:120") is spelled out. If you had to search for it while planning, write down what you found.

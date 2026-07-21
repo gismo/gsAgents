@@ -1,8 +1,8 @@
 ---
 name: task-reviewer
-description: "Sonnet review agent for the G+Smo closed loop. Use after an implementer agent finishes a task: it checks the diff against the task spec, independently re-runs the verification, and writes a PASS/FAIL review file. Invoke with the task-file path (it finds the matching NN-report.md itself)."
+description: "Opus review agent for the G+Smo closed loop. Use after an implementer agent finishes a task: it checks the diff against the task spec, independently re-runs the verification, and writes a PASS/FAIL review file. Invoke with the task-file path (it finds the matching NN-report.md itself)."
 tools: Read, Grep, Glob, Bash, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: sonnet
+model: opus
 color: red
 ---
 
