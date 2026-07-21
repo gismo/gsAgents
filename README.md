@@ -17,18 +17,33 @@ parallelism has exhausted RAM and crashed machines).
 
 | Agent | Tier | Role |
 |---|---|---|
-| `gismo:implementer` | sonnet | Library code in `src/`, `optional/*/src` |
-| `gismo:test-writer` | sonnet | UnitTest++ suites |
-| `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
-| `gismo:task-reviewer` | sonnet | Per-task PASS/FAIL review gate |
-| `gismo:doc-writer` | haiku | Doxygen / tutorials / README |
-| `gismo:builder` | haiku | Guarded `make` wrapper |
-| `gismo:unittest-runner` | haiku | Build + run + analyse tests |
-| `gismo:debugger` | haiku | GDB / Valgrind |
-| `gismo:indexer` | haiku | Codebase exploration (reads generated maps) |
+| `gismo:implementer` | opus | Library code in `src/`, `optional/*/src` |
+| `gismo:test-writer` | opus | UnitTest++ suites |
+| `gismo:example-writer` | opus | Runnable drivers in `examples/` |
+| `gismo:task-reviewer` | opus | Per-task PASS/FAIL review gate |
+| `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
+| `gismo:builder` | sonnet | Guarded `make` wrapper |
+| `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
+| `gismo:debugger` | sonnet | GDB / Valgrind |
+| `gismo:indexer` | sonnet | Codebase exploration (reads generated maps) |
 
-Cost control: the three sonnet implementers may spawn only the haiku
+Cost control: the three opus implementers may spawn only the sonnet
 `gismo:indexer`; nobody else spawns agents.
+
+### Overriding the model tiers
+
+The `model:` values above are **defaults**, not hard constraints — each is just a
+pin in the agent's frontmatter (`agents/*.md`). You can override them without
+editing any files:
+
+- **Session-wide:** set `CLAUDE_CODE_SUBAGENT_MODEL=<alias>` to force *every*
+  agent onto one model for that session — e.g. `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
+  to run the whole framework cheaper, or `=opus` for maximum capability. This
+  takes precedence over the frontmatter pins.
+- **Per agent, permanently:** edit the `model:` line in that agent's file (valid
+  aliases: `opus`, `sonnet`, `haiku`, `fable`, or a full model id).
+- **Unpin entirely:** remove the `model:` line (or set `model: inherit`) and that
+  agent runs on your **main session's** model instead of a fixed tier.
 
 **Skills** (invoke as `/gismo:<name>`):
 

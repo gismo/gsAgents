@@ -22,18 +22,20 @@ to this migration.
 
 | Agent | Model | Role |
 |---|---|---|
-| `gismo-implementer` | sonnet | library code in `src/`, `optional/*/src` |
-| `gismo-test-writer` | sonnet | UnitTest++ suites |
-| `gismo-example-writer` | sonnet | runnable drivers in `examples/` |
-| `gismo-task-reviewer` | sonnet | per-task PASS/FAIL review gate |
-| `gismo-doc-writer` | haiku | doxygen / tutorials / README |
-| `gismo-builder` | haiku | guarded make wrapper |
-| `gismo-unittest-runner` | haiku | build + run + analyse tests |
-| `gismo-debugger` | haiku | GDB / Valgrind |
-| `gismo-indexer` | haiku | codebase exploration (reads generated maps) |
+| `gismo-implementer` | opus | library code in `src/`, `optional/*/src` |
+| `gismo-test-writer` | opus | UnitTest++ suites |
+| `gismo-example-writer` | opus | runnable drivers in `examples/` |
+| `gismo-task-reviewer` | opus | per-task PASS/FAIL review gate |
+| `gismo-doc-writer` | sonnet | doxygen / tutorials / README |
+| `gismo-builder` | sonnet | guarded make wrapper |
+| `gismo-unittest-runner` | sonnet | build + run + analyse tests |
+| `gismo-debugger` | sonnet | GDB / Valgrind |
+| `gismo-indexer` | sonnet | codebase exploration (reads generated maps) |
 
-Nesting rule: the three sonnet implementers may spawn **only** the haiku
+Nesting rule: the three opus implementers may spawn **only** the sonnet
 `gismo-indexer`; nobody else may spawn agents. This is a deliberate cost control.
+The `model:` pins are defaults — a session-wide `CLAUDE_CODE_SUBAGENT_MODEL`
+override, or an omitted pin (inherit), lets users retune the tiers per run.
 
 **Skills** (`.claude/skills/`), each `SKILL.md` + `scripts/`:
 
@@ -93,7 +95,7 @@ Two constraints for the union:
 OpenCode's Claude-compatibility covers skills and `CLAUDE.md` — **not** `.claude/agents/`.
 Copilot needs a different extension plus extra frontmatter (`target`,
 `user-invocable`, `mcp-servers`). All three do support per-agent model selection, so
-the cheap-tier design survives everywhere.
+the tiered design survives everywhere.
 
 ⇒ Some agent transformation is unavoidable, but it is a **rename + frontmatter map**,
 not a compiler framework. Roughly a 100-line script, or a CI step.

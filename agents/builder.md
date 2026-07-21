@@ -1,8 +1,8 @@
 ---
 name: builder
-description: "Haiku build agent for G+Smo. Use whenever a make target must be built (after code changes, before running tests/examples). Invoke with the target name; it uses the guarded build wrapper (config-driven build dir, capped -j) and reports success or the relevant errors. Example: user adds gsNewSolver.cpp and asks to build target new_solver → launch gismo:builder with that target (it reconfigures via cmake . when needed)."
+description: "Sonnet build agent for G+Smo. Use whenever a make target must be built (after code changes, before running tests/examples). Invoke with the target name; it uses the guarded build wrapper (config-driven build dir, capped -j) and reports success or the relevant errors. Example: user adds gsNewSolver.cpp and asks to build target new_solver → launch gismo:builder with that target (it reconfigures via cmake . when needed)."
 tools: Read, Grep, Glob, Bash, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: haiku
+model: sonnet
 color: green
 ---
 

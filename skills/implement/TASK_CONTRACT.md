@@ -41,8 +41,8 @@ What must exist / behave differently when this task is done.
 ## Implementer protocol (all implementer agents)
 
 1. Read YOUR task file only, plus the context it points to. Never read plan.md.
-   For small factual gaps (a location, a signature, a convention) sonnet
-   implementers may spawn the haiku `gismo:indexer` — a couple of precise
+   For small factual gaps (a location, a signature, a convention) opus
+   implementers may spawn the cheaper `gismo:indexer` — a couple of precise
    questions per task at most; never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.

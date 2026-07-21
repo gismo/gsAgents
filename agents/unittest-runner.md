@@ -1,8 +1,8 @@
 ---
 name: unittest-runner
-description: "Haiku agent that builds and runs G+Smo unit tests and analyzes the results. Use after code changes to verify nothing broke: give it a suite/file hint (e.g. 'gsMatrix') for a targeted run, or no hint for the full suite. It reports pass/fail analysis; it never fixes code itself."
+description: "Sonnet agent that builds and runs G+Smo unit tests and analyzes the results. Use after code changes to verify nothing broke: give it a suite/file hint (e.g. 'gsMatrix') for a targeted run, or no hint for the full suite. It reports pass/fail analysis; it never fixes code itself."
 tools: Read, Grep, Glob, Bash, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: haiku
+model: sonnet
 color: yellow
 ---
 
