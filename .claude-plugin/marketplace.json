@@ -1,0 +1,15 @@
+{
+  "name": "gsagents",
+  "description": "Agent frameworks and developer tooling for the G+Smo isogeometric analysis library.",
+  "owner": {
+    "name": "G+Smo developers",
+    "url": "https://github.com/gismo"
+  },
+  "plugins": [
+    {
+      "name": "gismo",
+      "source": "./",
+      "description": "G+Smo developer agent framework: cost-tiered agents plus guarded build/test/syntax-check skills."
+    }
+  ]
+}

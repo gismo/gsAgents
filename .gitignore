@@ -28,6 +28,12 @@ poetry.lock
 # Build artifacts
 dist/
 build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+# In-source CMake output. There is no real build here (LANGUAGES NONE); the
+# generated Makefile is an artifact, not the project's committed Makefile.
+Makefile
 *.egg-info/
 *.whl
 *.tar.gz
