@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Closed-loop execution of an approved G+Smo plan — the main session orchestrates cheaper agents (opus implementers, opus reviewer, sonnet helpers) that implement, self-verify, and get reviewed task by task, ending with a plan-conformance check. Use after plan approval for any multi-step change; pass the plan-file path or slug.
+description: Closed-loop execution of an approved G+Smo plan — the main session decomposes and dispatches one gismo:task-lead per task, which runs the implement → review → repair cycle (opus implementers, opus reviewer, sonnet helpers) off the main context, ending with a plan-conformance check. Use after plan approval for any multi-step change; pass the plan-file path or slug.
 argument-hint: "<plan-file-or-slug>"
 ---
 
@@ -28,11 +28,12 @@ Artifact formats (task specs, reports, reviews, directory layout) are defined in
 
 For each task, in dependency order (dispatch `Parallelizable-with` groups concurrently, but never two tasks that build make targets at the same time — parallel `make` invocations in one build dir corrupt nothing but serialize anyway and double the load):
 
-1. **Dispatch** the task's agent with a minimal prompt: the task-file path, the repo root, and nothing else — the task file carries all context. Do not paste plan.md or your own analysis into the prompt.
-2. **Review**: when the report lands, dispatch `gismo:task-reviewer` with the task-file path.
-3. **Repair loop**: on `VERDICT: FAIL`, re-dispatch the same implementer agent with the task-file path + the review-file path ("address every numbered fix, update your report"). Maximum **2 repair rounds** per task; after that, intervene yourself (this is one of the exceptions) or, if the failure reveals a plan defect, go to step 4.
-4. **Blocked tasks** (`RESULT: BLOCKED` or reviewer-confirmed spec defect): fix the *task file* (or plan) yourself — that is orchestration, not implementation — then re-dispatch. If the plan itself must change direction, surface it to the user before rewriting.
-5. Update the native task status after each transition.
+1. **Dispatch `gismo:task-lead`** with a minimal prompt: the task-file path, the repo root, and nothing else — the task file carries all context. Do not paste plan.md or your own analysis into the prompt. The task-lead runs the whole cycle for you — implementer → `gismo:task-reviewer` → on `VERDICT: FAIL` a repair re-dispatch with the review file, up to **2 repair rounds** — and returns a single `CYCLE: PASS | FAIL | BLOCKED` verdict. None of the intermediate reports and reviews land in your context; read the `NN-report.md` / `NN-review.md` files when you need details.
+2. **On `CYCLE: FAIL`** (still failing after 2 repair rounds): intervene yourself (this is one of the exceptions) or, if the failure reveals a plan defect, go to step 3.
+3. **On `CYCLE: BLOCKED`** (`RESULT: BLOCKED` or reviewer-confirmed spec defect): fix the *task file* (or plan) yourself — that is orchestration, not implementation — then dispatch a fresh `gismo:task-lead`. If the plan itself must change direction, surface it to the user before rewriting.
+4. Update the native task status after each transition (the task-lead also updates it mid-cycle when a matching native task exists).
+
+Fallback: nested subagents require Claude Code >= 2.1.172. If `gismo:task-lead` fails because it cannot spawn agents, run the loop inline instead: dispatch the task's agent yourself, then `gismo:task-reviewer`, and on `VERDICT: FAIL` re-dispatch the implementer with the review-file path — same 2-repair-round cap, same escalation rules as above.
 
 ## 3. Final verification (yours alone)
 
@@ -44,7 +45,7 @@ When every task has `VERDICT: PASS`:
 
 ## Cost discipline
 
-- You (the expensive model) touch: plan, task files, reviews of reviews, final conformance, summary. Everything else is dispatched.
+- You (the expensive model) touch: plan, task files, escalations after a failed cycle, final conformance, summary. Everything else is dispatched — the per-task loop runs inside `gismo:task-lead`, so round-by-round reports and reviews never consume your context.
 - Exploration questions that come up mid-run go to `gismo:indexer` (sonnet) or the generated maps — not to your own file-reading spree.
 - Exceptions where you may edit code yourself: a task failed 2 repair rounds; a trivial cross-task integration fix (< ~10 lines) found during final conformance. Anything larger becomes a new task file.
 

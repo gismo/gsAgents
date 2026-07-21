@@ -1,4 +1,4 @@
-# G+Smo task contract (shared by orchestrator, implementers, reviewer)
+# G+Smo task contract (shared by orchestrator, task-leads, implementers, reviewer)
 
 Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 
@@ -37,6 +37,23 @@ What must exist / behave differently when this task is done.
 ## Acceptance criteria
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
+
+## Task-lead protocol (gismo:task-lead)
+
+One task-lead per task, dispatched by the orchestrator with the task-file path.
+It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
+
+1. Read the task file's `Agent:` line — nothing else. No plan.md, no source,
+   no context files: the implementer reads those itself.
+2. Dispatch that agent with the task-file path; on its return, dispatch
+   `gismo:task-reviewer` with the same path.
+3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
+   paths, then re-review. Maximum **2 repair rounds**, then stop.
+4. `RESULT: BLOCKED` or a reviewer-confirmed spec defect ends the cycle at
+   once — repair rounds cannot fix a broken spec.
+5. Return `CYCLE: PASS | FAIL | BLOCKED` plus rounds used, the outstanding
+   fixes (FAIL) or the blocker (BLOCKED). The task-lead edits no files and
+   runs no builds; spec repair and escalation belong to the orchestrator.
 
 ## Implementer protocol (all implementer agents)
 

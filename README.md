@@ -21,14 +21,25 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:test-writer` | opus | UnitTest++ suites |
 | `gismo:example-writer` | opus | Runnable drivers in `examples/` |
 | `gismo:task-reviewer` | opus | Per-task PASS/FAIL review gate |
+| `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
 | `gismo:debugger` | sonnet | GDB / Valgrind |
 | `gismo:indexer` | sonnet | Codebase exploration (reads generated maps) |
 
-Cost control: the three opus implementers may spawn only the sonnet
-`gismo:indexer`; nobody else spawns agents.
+The per-task closed loop runs as **nested subagents** (requires Claude Code
+>= 2.1.172): `/gismo:implement` dispatches one `gismo:task-lead` per task,
+which spawns the task's implementer and then `gismo:task-reviewer`, re-dispatching
+the implementer with the review file on `VERDICT: FAIL` — up to 2 repair rounds —
+before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
+reports and reviews stay out of the main session's context; the files under
+`.claude/plans/<slug>/tasks/` remain the audit trail.
+
+Cost control: the orchestrator spawns only `gismo:task-lead` (sonnet) during the
+loop; a task-lead spawns only its task's agent and `gismo:task-reviewer`; the
+three opus implementers may spawn only the sonnet `gismo:indexer`; nobody else
+spawns agents.
 
 ### Overriding the model tiers
 

@@ -26,14 +26,18 @@ to this migration.
 | `gismo-test-writer` | opus | UnitTest++ suites |
 | `gismo-example-writer` | opus | runnable drivers in `examples/` |
 | `gismo-task-reviewer` | opus | per-task PASS/FAIL review gate |
+| `gismo-task-lead` | sonnet | per-task loop-driver: implement → review → repair cycles |
 | `gismo-doc-writer` | sonnet | doxygen / tutorials / README |
 | `gismo-builder` | sonnet | guarded make wrapper |
 | `gismo-unittest-runner` | sonnet | build + run + analyse tests |
 | `gismo-debugger` | sonnet | GDB / Valgrind |
 | `gismo-indexer` | sonnet | codebase exploration (reads generated maps) |
 
-Nesting rule: the three opus implementers may spawn **only** the sonnet
-`gismo-indexer`; nobody else may spawn agents. This is a deliberate cost control.
+Nesting rule: the orchestrator spawns `gismo-task-lead` (sonnet), which spawns
+its task's implementer plus `gismo-task-reviewer`; the three opus implementers
+may spawn **only** the sonnet `gismo-indexer`; nobody else may spawn agents.
+This is a deliberate cost control. (Nested subagents require Claude Code
+>= 2.1.172; depth here peaks at 3 of the allowed 5.)
 The `model:` pins are defaults — a session-wide `CLAUDE_CODE_SUBAGENT_MODEL`
 override, or an omitted pin (inherit), lets users retune the tiers per run.
 
