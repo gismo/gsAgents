@@ -1,180 +1,105 @@
-[![Sync Agent Providers](https://github.com/gismo/gsAgents/actions/workflows/deploy.yml/badge.svg)](https://github.com/gismo/gsAgents/actions/workflows/deploy.yml)
+[![Validate plugin](https://github.com/gismo/gsAgents/actions/workflows/validate-plugin.yml/badge.svg)](https://github.com/gismo/gsAgents/actions/workflows/validate-plugin.yml)
 
-# gsAgents - Multi-Provider Agent Compiler
+# gsAgents — G+Smo developer agent plugin
 
-A unified agent and skill compilation system that transforms universal JSON configurations into provider-specific formats for Claude Code, OpenCode, GitHub Copilot, and Gemini CLI.
+A Claude Code plugin providing a cost-tiered, closed-loop agent framework for
+developing the [G+Smo](https://github.com/gismo/gismo) isogeometric analysis
+library: specialist agents for implementation, testing, examples, docs and
+review, plus guarded build / test / syntax-check skills.
 
-## Repository Structure
+Build safety is built in: every compilation goes through a guarded wrapper that
+refuses bare `make` (which would build all ~61 examples) and caps `-j` (unbounded
+parallelism has exhausted RAM and crashed machines).
 
-```
-gsAgent/
-├── agents/                 # Universal agent JSON configurations
-├── skills/                 # Universal skill JSON configurations
-├── compiler/               # Compilation engine and templates
-│   ├── compile.py          # Main compilation script
-│   ├── templates/          # Provider-specific templates
-│   └── schema/            # JSON schemas
-├── output/                 # Compiled provider-specific outputs
-├── .github/workflows/      # GitHub Actions for deployment
-└── AGENTS.md              # Universal instructions
-```
+## What's in the plugin
 
-## Quick Start
+**Agents** (dispatched via the Agent tool as `gismo:<name>`):
 
-1. **Initialize deployment structure:**
-   ```bash
-   ./init-deploy.sh
-   ```
+| Agent | Tier | Role |
+|---|---|---|
+| `gismo:implementer` | sonnet | Library code in `src/`, `optional/*/src` |
+| `gismo:test-writer` | sonnet | UnitTest++ suites |
+| `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
+| `gismo:task-reviewer` | sonnet | Per-task PASS/FAIL review gate |
+| `gismo:doc-writer` | haiku | Doxygen / tutorials / README |
+| `gismo:builder` | haiku | Guarded `make` wrapper |
+| `gismo:unittest-runner` | haiku | Build + run + analyse tests |
+| `gismo:debugger` | haiku | GDB / Valgrind |
+| `gismo:indexer` | haiku | Codebase exploration (reads generated maps) |
 
-2. **Add your agent configurations:**
-   - Place agent JSON files in `agents/` directory
-   - Place skill JSON files in `skills/` directory
+Cost control: the three sonnet implementers may spawn only the haiku
+`gismo:indexer`; nobody else spawns agents.
 
-3. **Compile and validate:**
-   ```bash
-   python3 compiler/compile.py --validate
-   python3 compiler/compile.py --all
-   ```
+**Skills** (invoke as `/gismo:<name>`):
 
-4. **Deploy:**
-   - Commit and push to trigger GitHub Actions
-   - Agents will be compiled and deployed to separate branches
+| Skill | Purpose |
+|---|---|
+| `/gismo:plan` | Planning conventions → `plan.md` + task files |
+| `/gismo:implement` | Closed-loop orchestration of an approved plan |
+| `/gismo:dev-config` | Set build dir + parallel-jobs cap |
+| `/gismo:build-target` | Guarded `make <target>` — the only sanctioned build |
+| `/gismo:syntax-check` | Per-file `-fsyntax-only` gate via `compile_commands.json` |
+| `/gismo:run-tests` | Build + run unit tests, optionally filtered |
+| `/gismo:tree` | Core-library map (src/, examples/, unittests/) |
+| `/gismo:module-map` | Per-submodule context for `optional/` modules |
 
-## Compilation Process
+## Installation
 
-The compiler transforms universal JSON configurations into provider-specific formats:
-
-### Unified JSON Format
-```json
-{
-  "name": "security-auditor",
-  "description": "Security-focused code auditor",
-  "tools": ["read", "grep", "glob", "bash"],
-  "permissions": {
-    "edit": "deny",
-    "bash": "ask"
-  },
-  "model": "sonnet",
-  "color": "red",
-  "temperature": 0.5,
-  "providers": {
-    "claude": true,
-    "opencode": true,
-    "copilot": true,
-    "gemini": false
-  }
-}
-```
-
-### Provider-Specific Output
-
-#### Claude Code (`.claude/agents/`)
-```yaml
----
-name: security-auditor
-description: Security-focused code auditor
-tools: [Read, Grep, Glob, Bash]
-color: red
----
-
-[Prompt content]
-```
-
-#### OpenCode (`.opencode/agents/`)
-```yaml
----
-description: Security-focused code auditor
-tools:
-  read: true
-  grep: true
-  glob: true
-  bash: true
-model: sonnet
-temperature: 0.5
----
-
-[Prompt content]
-```
-
-#### GitHub Copilot (`.github/agents/`)
-```yaml
----
-name: security-auditor
-description: Security-focused code auditor
-tools: ['read', 'grep', 'glob', 'bash']
----
-
-[Prompt content]
-```
-
-## GitHub Actions Workflow
-
-The repository includes a CI/CD pipeline that:
-
-1. **Triggers on push to main branch**
-2. **Compiles agents for each provider** (claude, copilot, opencode)
-3. **Deploys to separate branches:**
-   - `agents-claude` - Claude Code agents
-   - `agents-copilot` - GitHub Copilot agents  
-   - `agents-opencode` - OpenCode agents
-4. **Creates release artifacts** for each provider
-
-## Supported Providers
-
-- **Claude Code** - `.claude/` directory
-- **OpenCode** - `.opencode/` directory  
-- **GitHub Copilot** - `.github/` directory
-- **Gemini CLI** - `.gemini/` directory (skills only)
-
-## Commands
+### Via the Claude Code CLI
 
 ```bash
-# Validate all configurations
-python3 compiler/compile.py --validate
-
-# Compile all agents and skills
-python3 compiler/compile.py --all
-
-# Compile specific agent
-python3 compiler/compile.py --agent security-auditor
-
-# Compile for specific provider
-python3 compiler/compile.py --provider claude --all
-
-# Compile only agents
-python3 compiler/compile.py --agents-only
-
-# Compile only skills
-python3 compiler/compile.py --skills-only
+claude plugin marketplace add gismo/gsAgents
+claude plugin install gismo@gsagents
 ```
 
-## File Naming Conventions
+Or, from a local checkout of this repo:
 
-- **Agents:** `agents/{agent-name}.json`
-- **Skills:** `skills/{skill-name}.json`
-- **Compiled agents:** `output/.{provider}/agents/{agent-name}.{ext}`
-- **Compiled skills:** `output/.{provider}/skills/{skill-name}/SKILL.md`
+```bash
+claude plugin marketplace add /path/to/gsAgents
+claude plugin install gismo@gsagents
+```
 
-## Provider-Specific Notes
+### Via the G+Smo CMake flag (optional)
 
-- **Claude:** Uses PascalCase for tools, supports color and model
-- **OpenCode:** Uses YAML format with boolean values for tools
-- **Copilot:** Uses quoted strings for tools, supports handoffs and MCP servers
-- **Gemini:** Skills only, no agent support
+For developers who want the install driven from their G+Smo build configuration:
 
-## Deployment Branches
+```bash
+cmake -DGISMO_INSTALL_AGENTS=ON \
+      -DGISMO_AGENTS_SOURCE=/path/to/gsAgents \
+      -DGISMO_AGENTS_SCOPE=user .
+cmake --build . --target install-agents
+```
 
-Each provider gets its own deployment branch:
-- `agents-claude` - Claude Code agents
-- `agents-copilot` - GitHub Copilot agents
-- `agents-opencode` - OpenCode agents
+`GISMO_AGENTS_SCOPE` is `user` (default), `project`, or `local`. The target
+validates the manifest before touching your configuration and is safe to re-run.
+Opting out (the default, `GISMO_INSTALL_AGENTS=OFF`) leaves your tree untouched.
 
-## Requirements
+## Repository layout
 
-- Python 3.7+
-- pip packages: jinja2, schema
-- GitHub repository with Actions enabled
+```
+gsAgents/
+├── .claude-plugin/
+│   ├── plugin.json         # plugin manifest
+│   └── marketplace.json    # this repo doubles as its own marketplace
+├── agents/*.md             # agent definitions (Claude format)
+├── skills/<name>/          # SKILL.md + scripts/, per the Agent Skills standard
+├── cmake/InstallPlugin.cmake
+└── CMakeLists.txt          # optional install flag
+```
 
-## License
+There is **no build or generation step**: the repository *is* the plugin. Skills
+reference their bundled scripts via `${CLAUDE_PLUGIN_ROOT}`, which the CLI
+resolves at load time.
 
-This repository follows the standard open-source licensing model for AI agent configurations.
+## Generated context maps
+
+`/gismo:tree` and `/gismo:module-map` generate per-checkout maps into
+`<gismo-root>/.claude/gismo-maps/` — they are project data, not shipped with the
+plugin (one install serves many worktrees). On a fresh checkout the maps do not
+exist yet; the skills generate them on first use.
+
+## Scope
+
+gsAgents currently targets **Claude Code only**. GitHub Copilot CLI and OpenCode
+were evaluated and deferred — see `PLUGIN_MIGRATION_BRIEF.md` for the provider
+research and the rationale.

@@ -1,0 +1,69 @@
+name: Validate plugin
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Structural checks that need no CLI: the manifests are well-formed JSON,
+      # every skill's `name` matches its directory (required by the Agent Skills
+      # standard), and no stale gismo:-prefixed script paths survive a rename.
+      - name: Validate manifests and skill names
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys
+
+          fail = []
+
+          for m in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
+              try:
+                  json.load(open(m))
+              except Exception as e:
+                  fail.append(f"{m}: invalid JSON ({e})")
+
+          name_re = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+          for d in sorted(os.listdir("skills")):
+              sk = os.path.join("skills", d, "SKILL.md")
+              if not os.path.isfile(sk):
+                  continue
+              head = open(sk).read().split("---", 2)
+              fm = head[1] if len(head) > 2 else ""
+              m = re.search(r"^name:\s*(.+)$", fm, re.M)
+              nm = m.group(1).strip().strip('"') if m else None
+              if nm != d:
+                  fail.append(f"skills/{d}: SKILL.md name '{nm}' != directory '{d}'")
+              elif not name_re.match(nm):
+                  fail.append(f"skills/{d}: name '{nm}' is not lowercase-hyphenated")
+
+          # Cross-script source paths must not reference the pre-rename gismo: dirs.
+          import subprocess
+          hits = subprocess.run(
+              ["grep", "-rn", "../../gismo:", "skills"],
+              capture_output=True, text=True).stdout.strip()
+          if hits:
+              fail.append("stale gismo:-prefixed script paths:\n" + hits)
+
+          if fail:
+              print("VALIDATION FAILED:")
+              for f in fail:
+                  print("  -", f)
+              sys.exit(1)
+          print("OK: manifests, skill names, and script paths are consistent")
+          PY
+
+      # Authoritative schema check via the CLI, when available in the runner.
+      - name: Install Claude Code CLI
+        continue-on-error: true
+        id: cli
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: claude plugin validate
+        if: steps.cli.outcome == 'success'
+        run: claude plugin validate .
