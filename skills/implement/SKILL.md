@@ -11,7 +11,7 @@ Artifact formats (task specs, reports, reviews, directory layout) are defined in
 ## 1. Set up the run
 
 - Pick a short slug for the feature; create `.claude/plans/<slug>/` and `tasks/`.
-- Write (or copy) the approved plan to `.claude/plans/<slug>/plan.md`. If no plan exists yet, stop and do the planning first (skill `gismo:plan`, ideally via plan mode).
+- Write (or copy) the approved plan to `.claude/plans/<slug>/plan.md`. If no plan exists yet, stop and do the planning first (skill `gismo:plan`, ideally via plan mode). If the plan was drafted in plain plan mode *without* `/gismo:plan`, read `${CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` now and bring the plan up to its standard (grounded file inventory with real paths, checkable verification) before decomposing — a free-form plan decomposes into blocked tasks.
 - Decompose the plan into task files `tasks/NN-<name>.md` per the contract and the sizing rules in `gismo:plan`. Choose each task's `Agent:` line:
   - `gismo:implementer` — library code in `src/`, `optional/*/src`
   - `gismo:test-writer` — UnitTest++ suites

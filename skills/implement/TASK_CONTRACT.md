@@ -69,7 +69,14 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    c. the task's test command
 4. Write `NN-report.md`: files changed, what was done, verification evidence
    (the STATUS lines + relevant output tails), and any deviation from the spec
-   with its reason. End the file with `RESULT: DONE` or `RESULT: BLOCKED`.
+   with its reason. Every claim must be auditable against a tool result from
+   this run — only report work you can point to evidence for; if something is
+   unverified or failing, say so plainly instead of hedging. End the file with
+   `RESULT: DONE` or `RESULT: BLOCKED`.
+5. You operate autonomously: nobody answers questions mid-task. Never end your
+   turn on a question, a plan, or a promise ("I'll now build...") — end only
+   after the report file is written (`RESULT: BLOCKED` is a report, not a
+   question).
 
 ## Reviewer protocol (gismo:task-reviewer)
 
@@ -77,8 +84,10 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    `git status --short` to catch out-of-scope edits).
 2. Independently re-run the test command when one is given (`--no-build` only if
    the report shows a fresh successful build of the same target).
-3. Write `NN-review.md`: verdict `PASS` or `FAIL`, and for FAIL a numbered list
-   of required fixes (each concrete enough to act on without re-investigation).
+3. Write `NN-review.md`: verdict `PASS` or `FAIL`, for FAIL a numbered list
+   of required fixes (each concrete enough to act on without re-investigation),
+   and a `Notes:` section for non-blocking findings — report everything found,
+   at every severity; only blocking findings decide the verdict.
    Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
    G+Smo conventions, no out-of-scope files touched, no scope creep.
 

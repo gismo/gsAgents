@@ -56,6 +56,19 @@ editing any files:
 - **Unpin entirely:** remove the `model:` line (or set `model: inherit`) and that
   agent runs on your **main session's** model instead of a fixed tier.
 
+### Prompting standards
+
+The agent and skill prompts follow Anthropic's official model-specific
+prompting guides — [Opus 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5),
+[Sonnet 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5),
+[Fable 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5).
+In particular: reviewers report with coverage first and filter downstream
+(never "only high-severity"); verification lives in an independent
+fresh-context reviewer rather than "double-check your work" instructions;
+subagent spawning is explicitly capped; task specs carry the full
+specification up front (zero-discovery rule); and reports must ground every
+claim in tool-result evidence. Keep these properties when editing prompts.
+
 **Skills** (invoke as `/gismo:<name>`):
 
 | Skill | Purpose |
