@@ -20,7 +20,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:implementer` | opus | Library code in `src/`, `optional/*/src` |
 | `gismo:test-writer` | opus | UnitTest++ suites |
 | `gismo:example-writer` | opus | Runnable drivers in `examples/` |
-| `gismo:task-reviewer` | opus | Per-task PASS/FAIL review gate |
+| `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |

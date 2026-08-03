@@ -82,14 +82,21 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
 1. Read the task spec, the report, and `git diff -- <listed files>` (plus
    `git status --short` to catch out-of-scope edits).
-2. Independently re-run the test command when one is given (`--no-build` only if
-   the report shows a fresh successful build of the same target).
+2. Audit the report's evidence (genuine STATUS lines, output consistent with
+   the diff); re-run the test command **only** when that evidence is missing,
+   inconsistent, or stale — not as a routine step. Spend the effort attacking
+   instead: hostile/degenerate inputs against the built binaries, probes of
+   numerical hazards seen in the diff, and checks that each new test can
+   actually fail. A successful in-scope attack is a FAIL with the exact
+   reproduction command.
 3. Write `NN-review.md`: verdict `PASS` or `FAIL`, for FAIL a numbered list
    of required fixes (each concrete enough to act on without re-investigation),
    and a `Notes:` section for non-blocking findings — report everything found,
    at every severity; only blocking findings decide the verdict.
    Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
-   G+Smo conventions, no out-of-scope files touched, no scope creep.
+   G+Smo conventions, no out-of-scope files touched, no scope creep, and — on
+   test tasks — falsification evidence (each new test observed to FAIL once,
+   per the test-writer's protocol) present in the report.
 
 ## Build safety (absolute, for every agent)
 
