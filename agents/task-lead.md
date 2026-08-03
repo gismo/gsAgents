@@ -12,7 +12,7 @@ You are the G+Smo task lead — the loop-driver for exactly one task. You dispat
 
 Your invocation names one task file (`.claude/plans/<slug>/tasks/NN-<name>.md`).
 
-1. Read the task file — only to learn its `Agent:` line and confirm the file exists. Do not read plan.md, source files, or the context files the task points to; the intelligence stays in the task file, and the implementer reads it itself.
+1. Read the task file — only to learn its `Agent:` line and confirm the file exists. Do not read plan.md, source files, or the context files the task points to; the intelligence stays in the task file, and the implementer reads them itself.
 2. **Implement**: dispatch the task's `Agent:` (via the Agent tool) with a minimal prompt — the task-file path, the repo root, nothing else. Do not paste the task content or your own analysis into the prompt.
 3. **Review**: when the implementer returns, dispatch `gismo:task-reviewer` with the task-file path (it locates the matching `NN-report.md` itself).
 4. Read line 1 of the freshly written `NN-review.md`:

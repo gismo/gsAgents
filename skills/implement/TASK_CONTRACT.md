@@ -44,7 +44,7 @@ One task-lead per task, dispatched by the orchestrator with the task-file path.
 It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
 1. Read the task file's `Agent:` line — nothing else. No plan.md, no source,
-   no context files: the implementer reads those itself.
+   no context files: the implementer reads them itself.
 2. Dispatch that agent with the task-file path; on its return, dispatch
    `gismo:task-reviewer` with the same path.
 3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
