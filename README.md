@@ -20,15 +20,26 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:implementer` | opus | Library code in `src/`, `optional/*/src` |
 | `gismo:test-writer` | opus | UnitTest++ suites |
 | `gismo:example-writer` | opus | Runnable drivers in `examples/` |
-| `gismo:task-reviewer` | opus | Per-task PASS/FAIL review gate |
+| `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
+| `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
 | `gismo:debugger` | sonnet | GDB / Valgrind |
 | `gismo:indexer` | sonnet | Codebase exploration (reads generated maps) |
 
-Cost control: the three opus implementers may spawn only the sonnet
-`gismo:indexer`; nobody else spawns agents.
+The per-task closed loop runs as **nested subagents** (requires Claude Code
+>= 2.1.172): `/gismo:implement` dispatches one `gismo:task-lead` per task,
+which spawns the task's implementer and then `gismo:task-reviewer`, re-dispatching
+the implementer with the review file on `VERDICT: FAIL` — up to 2 repair rounds —
+before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
+reports and reviews stay out of the main session's context; the files under
+`.claude/plans/<slug>/tasks/` remain the audit trail.
+
+Cost control: the orchestrator spawns only `gismo:task-lead` (sonnet) during the
+loop; a task-lead spawns only its task's agent and `gismo:task-reviewer`; the
+three opus implementers may spawn only the sonnet `gismo:indexer`; nobody else
+spawns agents.
 
 ### Overriding the model tiers
 
@@ -44,6 +55,19 @@ editing any files:
   aliases: `opus`, `sonnet`, `haiku`, `fable`, or a full model id).
 - **Unpin entirely:** remove the `model:` line (or set `model: inherit`) and that
   agent runs on your **main session's** model instead of a fixed tier.
+
+### Prompting standards
+
+The agent and skill prompts follow Anthropic's official model-specific
+prompting guides — [Opus 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5),
+[Sonnet 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5),
+[Fable 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5).
+In particular: reviewers report with coverage first and filter downstream
+(never "only high-severity"); verification lives in an independent
+fresh-context reviewer rather than "double-check your work" instructions;
+subagent spawning is explicitly capped; task specs carry the full
+specification up front (zero-discovery rule); and reports must ground every
+claim in tool-result evidence. Keep these properties when editing prompts.
 
 **Skills** (invoke as `/gismo:<name>`):
 

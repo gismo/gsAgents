@@ -1,4 +1,4 @@
-# G+Smo task contract (shared by orchestrator, implementers, reviewer)
+# G+Smo task contract (shared by orchestrator, task-leads, implementers, reviewer)
 
 Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 
@@ -38,6 +38,23 @@ What must exist / behave differently when this task is done.
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
 
+## Task-lead protocol (gismo:task-lead)
+
+One task-lead per task, dispatched by the orchestrator with the task-file path.
+It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
+
+1. Read the task file's `Agent:` line — nothing else. No plan.md, no source,
+   no context files: the implementer reads them itself.
+2. Dispatch that agent with the task-file path; on its return, dispatch
+   `gismo:task-reviewer` with the same path.
+3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
+   paths, then re-review. Maximum **2 repair rounds**, then stop.
+4. `RESULT: BLOCKED` or a reviewer-confirmed spec defect ends the cycle at
+   once — repair rounds cannot fix a broken spec.
+5. Return `CYCLE: PASS | FAIL | BLOCKED` plus rounds used, the outstanding
+   fixes (FAIL) or the blocker (BLOCKED). The task-lead edits no files and
+   runs no builds; spec repair and escalation belong to the orchestrator.
+
 ## Implementer protocol (all implementer agents)
 
 1. Read YOUR task file only, plus the context it points to. Never read plan.md.
@@ -52,18 +69,34 @@ What must exist / behave differently when this task is done.
    c. the task's test command
 4. Write `NN-report.md`: files changed, what was done, verification evidence
    (the STATUS lines + relevant output tails), and any deviation from the spec
-   with its reason. End the file with `RESULT: DONE` or `RESULT: BLOCKED`.
+   with its reason. Every claim must be auditable against a tool result from
+   this run — only report work you can point to evidence for; if something is
+   unverified or failing, say so plainly instead of hedging. End the file with
+   `RESULT: DONE` or `RESULT: BLOCKED`.
+5. You operate autonomously: nobody answers questions mid-task. Never end your
+   turn on a question, a plan, or a promise ("I'll now build...") — end only
+   after the report file is written (`RESULT: BLOCKED` is a report, not a
+   question).
 
 ## Reviewer protocol (gismo:task-reviewer)
 
 1. Read the task spec, the report, and `git diff -- <listed files>` (plus
    `git status --short` to catch out-of-scope edits).
-2. Independently re-run the test command when one is given (`--no-build` only if
-   the report shows a fresh successful build of the same target).
-3. Write `NN-review.md`: verdict `PASS` or `FAIL`, and for FAIL a numbered list
-   of required fixes (each concrete enough to act on without re-investigation).
+2. Audit the report's evidence (genuine STATUS lines, output consistent with
+   the diff); re-run the test command **only** when that evidence is missing,
+   inconsistent, or stale — not as a routine step. Spend the effort attacking
+   instead: hostile/degenerate inputs against the built binaries, probes of
+   numerical hazards seen in the diff, and checks that each new test can
+   actually fail. A successful in-scope attack is a FAIL with the exact
+   reproduction command.
+3. Write `NN-review.md`: verdict `PASS` or `FAIL`, for FAIL a numbered list
+   of required fixes (each concrete enough to act on without re-investigation),
+   and a `Notes:` section for non-blocking findings — report everything found,
+   at every severity; only blocking findings decide the verdict.
    Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
-   G+Smo conventions, no out-of-scope files touched, no scope creep.
+   G+Smo conventions, no out-of-scope files touched, no scope creep, and — on
+   test tasks — falsification evidence (each new test observed to FAIL once,
+   per the test-writer's protocol) present in the report.
 
 ## Build safety (absolute, for every agent)
 

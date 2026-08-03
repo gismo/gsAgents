@@ -20,7 +20,18 @@ You are a G+Smo unit-test specialist. You execute exactly one test-writing task 
 ## Verification
 
 - Build: `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh unittests`
-- Run only your suite: `bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh --no-build <suite-prefix>` (prefix-matched). A test that has never been seen to FAIL is suspect: when testing a bug fix, note in your report how you convinced yourself the test would catch the original bug.
+- Run only your suite: `bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh --no-build <suite-prefix>` (prefix-matched).
+
+## Falsification (mandatory)
+
+A test that has never been seen to FAIL proves nothing — it may be tautological, have a tolerance loose enough to pass anything, or silently test the wrong thing. Before your final green run, demonstrate that **each new test can fail**, pick the strongest method that applies:
+
+- **Bug-fix tests**: run the test against the *unfixed* code — `git stash` the fix, build, observe the FAIL, `git stash pop`, observe the PASS. This is the gold standard: the test fails before the fix, passes after. (Stash touches the shared worktree — do it only around your own build/run commands, restore immediately, and verify `git stash list` is empty afterwards.)
+- **New-feature tests**: if the feature can be cheaply reverted the same way, do that. Otherwise run a sensitivity check: temporarily perturb the test's expected value just beyond its tolerance (or invert one assertion), rebuild, observe the FAIL, then restore the exact values and re-run green. A `CHECK_CLOSE` that still passes with a perturbed reference has a defective tolerance — fix the tolerance, not the perturbation.
+
+Record the falsification evidence in `NN-report.md`: which method you used per test and the observed FAIL output tail. The reviewer treats a report without it as a defect.
+
+Also test the failure modes, not only the happy path: invalid or degenerate inputs that the spec says must be rejected deserve `CHECK_THROW` (G+Smo errors via `GISMO_ERROR`/`GISMO_ENSURE` throw) or an assertion on the documented error behavior.
 
 ## Build safety (absolute)
 
