@@ -1,4 +1,4 @@
-# G+Smo task contract (shared by orchestrator, task-leads, implementers, reviewer)
+# G+Smo task contract (shared by orchestrator, spec-writers, task-leads, implementers, reviewer)
 
 Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 
@@ -6,7 +6,7 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 .claude/plans/<slug>/
 ├── plan.md            # the approved plan (context, approach, file inventory, verification)
 ├── tasks/
-│   ├── 01-<name>.md   # task spec (written by the orchestrator)
+│   ├── 01-<name>.md   # task spec (orchestrator decomposes, gismo:spec-writer writes)
 │   ├── 01-report.md   # implementation report (written by the implementer agent)
 │   ├── 01-review.md   # review verdict (written by gismo:task-reviewer)
 │   └── ...
@@ -20,6 +20,7 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 Agent: gismo:implementer | gismo:test-writer | gismo:example-writer | gismo:doc-writer
 Build target: <make target to build, or "none">
 Test command: bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh <prefix>   (or "none")
+Review: full | light | none
 Parallelizable-with: <task numbers, or "none">
 
 ## Goal
@@ -38,15 +39,58 @@ What must exist / behave differently when this task is done.
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
 
+The `Review:` level is the orchestrator's cost/robustness dial, fixed at
+decomposition time:
+
+- `full` — the whole adversarial cycle, in-cycle, per task. Default for
+  library code, numerics, and anything a later task builds on.
+- `light` / `none` — **review is deferred, not skipped.** The task-lead
+  accepts a `RESULT: DONE` report with a non-empty evidence section and
+  returns `CYCLE: PASS (review deferred)` (missing evidence earns one repair
+  re-dispatch, then `CYCLE: FAIL`); the orchestrator collects all
+  deferred tasks and dispatches ONE `gismo:task-reviewer` in **batch mode**
+  at the end of the run (before final conformance). In the batch, `light`
+  tasks get a diff-vs-spec read, `none` tasks an evidence sanity check.
+  `light` fits low-risk, well-isolated changes; `none` doc-only tasks.
+  Neither is ever for code that a test or another task builds on — that is
+  what makes end-of-run batching safe.
+- A task that FAILs its batch review has outlived its low-risk label: the
+  orchestrator escalates the spec's `Review:` line to `full` and re-runs
+  `gismo:task-lead` (giving the review-file path as context in the prompt) —
+  never another deferred pass.
+
+## Spec-writer protocol (gismo:spec-writer)
+
+The orchestrator decomposes; one spec-writer per task writes the file.
+Dispatched with a decomposition entry (number, one-line goal, `Agent:`, build
+target, test command, dependencies, allowed files) and the plan directory.
+
+1. Read `plan.md` for intent — spec-writers are on the orchestration side and
+   may read it; implementers may not.
+2. Ground every pointer in the real tree: exact paths, signatures, the
+   `file.hpp:120` location of the pattern to imitate, the relevant module map.
+   Cheap lookups may go to `gismo:indexer`; no other agent type.
+3. Never invent a pointer. A plan reference that does not exist in the tree is
+   a **grounding gap**, reported to the orchestrator — not guessed around.
+4. Write `NN-<name>.md` in the format above and return
+   `SPEC: WRITTEN | BLOCKED` plus a `Gaps:` list.
+
+The spec-writer has no Bash tool: it never builds, runs, or configures.
+
 ## Task-lead protocol (gismo:task-lead)
 
 One task-lead per task, dispatched by the orchestrator with the task-file path.
 It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
-1. Read the task file's `Agent:` line — nothing else. No plan.md, no source,
-   no context files: the implementer reads them itself.
+1. Read the task file's `Agent:` and `Review:` lines — nothing else. No
+   plan.md, no source, no context files: the implementer reads them itself.
 2. Dispatch that agent with the task-file path; on its return, dispatch
-   `gismo:task-reviewer` with the same path.
+   `gismo:task-reviewer` with the same path — `Review: full` only. On
+   `light`/`none`, skip the reviewer (the orchestrator batch-reviews these
+   at the end): a `RESULT: DONE` report with a non-empty evidence section
+   is `CYCLE: PASS (review deferred)`; an empty or missing evidence section
+   earns one repair re-dispatch ("complete the evidence section"), after
+   which a still-evidence-less report is `CYCLE: FAIL`.
 3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
    paths, then re-review. Maximum **2 repair rounds**, then stop.
 4. `RESULT: BLOCKED` or a reviewer-confirmed spec defect ends the cycle at
@@ -79,6 +123,11 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    question).
 
 ## Reviewer protocol (gismo:task-reviewer)
+
+Two modes: per-task (dispatched by a task-lead, one path, full adversarial
+depth) and batch (dispatched by the orchestrator with the run's deferred
+`light`/`none` tasks; depth scaled per task's level, one `NN-review.md`
+each, plus cross-task consistency notes). Both follow:
 
 1. Read the task spec, the report, and `git diff -- <listed files>` (plus
    `git status --short` to catch out-of-scope edits).

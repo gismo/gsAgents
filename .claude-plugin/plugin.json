@@ -1,7 +1,7 @@
 {
   "name": "gismo",
   "description": "G+Smo developer agent framework: cost-tiered agents for implementation, testing, examples, docs and review, plus guarded build/test/syntax-check skills. Every build goes through the guarded wrapper — never bare make, never unbounded -j.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "author": {
     "name": "G+Smo developers",
     "url": "https://github.com/gismo"
