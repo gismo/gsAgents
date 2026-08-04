@@ -46,16 +46,18 @@ decomposition time:
   library code, numerics, and anything a later task builds on.
 - `light` / `none` — **review is deferred, not skipped.** The task-lead
   accepts a `RESULT: DONE` report with a non-empty evidence section and
-  returns `CYCLE: PASS (review deferred)`; the orchestrator collects all
+  returns `CYCLE: PASS (review deferred)` (missing evidence earns one repair
+  re-dispatch, then `CYCLE: FAIL`); the orchestrator collects all
   deferred tasks and dispatches ONE `gismo:task-reviewer` in **batch mode**
   at the end of the run (before final conformance). In the batch, `light`
   tasks get a diff-vs-spec read, `none` tasks an evidence sanity check.
   `light` fits low-risk, well-isolated changes; `none` doc-only tasks.
   Neither is ever for code that a test or another task builds on — that is
   what makes end-of-run batching safe.
-- A task that FAILs its batch review has outlived its low-risk label: its
-  repair runs as a fresh **full** cycle (task-lead with the review file),
-  not another deferred pass.
+- A task that FAILs its batch review has outlived its low-risk label: the
+  orchestrator escalates the spec's `Review:` line to `full` and re-runs
+  `gismo:task-lead` (giving the review-file path as context in the prompt) —
+  never another deferred pass.
 
 ## Spec-writer protocol (gismo:spec-writer)
 
@@ -86,7 +88,9 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    `gismo:task-reviewer` with the same path — `Review: full` only. On
    `light`/`none`, skip the reviewer (the orchestrator batch-reviews these
    at the end): a `RESULT: DONE` report with a non-empty evidence section
-   is `CYCLE: PASS (review deferred)`.
+   is `CYCLE: PASS (review deferred)`; an empty or missing evidence section
+   earns one repair re-dispatch ("complete the evidence section"), after
+   which a still-evidence-less report is `CYCLE: FAIL`.
 3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
    paths, then re-review. Maximum **2 repair rounds**, then stop.
 4. `RESULT: BLOCKED` or a reviewer-confirmed spec defect ends the cycle at

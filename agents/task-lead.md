@@ -17,7 +17,7 @@ Your invocation names one task file (`.claude/plans/<slug>/tasks/NN-<name>.md`).
 3. **Review**: when the implementer returns, act on the task's `Review:` level:
    - `full` (or the line is absent) → dispatch `gismo:task-reviewer` with the task-file path (it locates the matching `NN-report.md` itself).
    - `light` or `none` → do NOT dispatch the reviewer; review is deferred to the orchestrator's end-of-run batch. Read the report yourself: `RESULT: DONE` with a non-empty verification-evidence section → `CYCLE: PASS (review deferred)` (round 0); evidence missing → one repair re-dispatch ("complete the evidence section"), then judge again.
-4. Read line 1 of the freshly written `NN-review.md`:
+4. Only when you dispatched the reviewer (`Review: full`) — read line 1 of the freshly written `NN-review.md`:
    - `VERDICT: PASS` → the cycle is done.
    - `VERDICT: FAIL` → re-dispatch the same agent type with the task-file path **and** the review-file path ("address every numbered fix, then update your report"), then re-dispatch the reviewer. Maximum **2 repair rounds**; a still-failing task after that is a final `CYCLE: FAIL` — escalating is the orchestrator's call, not yours.
 5. A report ending `RESULT: BLOCKED`, or a review that identifies a spec defect (the task file itself is wrong or impossible), ends the cycle immediately as `CYCLE: BLOCKED` — repair rounds cannot fix a broken spec, so do not spend them.
