@@ -43,11 +43,13 @@ the spec is where the framework's intelligence lives) and `gismo:task-lead`
 `gismo:task-reviewer`; spec-writers and the three opus implementers may spawn
 only the sonnet `gismo:indexer`; nobody else spawns agents.
 
-The ceremony also scales with risk: each task spec carries a `Review:` level
-(`full` adversarial cycle / `light` evidence-audit + diff read / `none` for
-doc-only tasks), fixed by the orchestrator at decomposition time — so a
-trivial task no longer pays the full implement-and-attack cycle, while
-library code keeps the strict gate.
+The ceremony also scales with risk: each task spec carries a `Review:` level,
+fixed by the orchestrator at decomposition time. `full` tasks get the
+in-cycle adversarial review; `light`/`none` tasks defer their review into
+ONE end-of-run batch pass (diff-vs-spec read for `light`, evidence sanity
+for `none`, plus a cross-task consistency look the per-task reviews can't
+give) — so trivial tasks are cheap, nothing ships unreviewed, and a task
+that fails its batch review is repaired under the full cycle.
 
 The orchestrator therefore never writes the bulk artifacts: it decomposes the
 plan into one compact line per task and dispatches a `gismo:spec-writer` to

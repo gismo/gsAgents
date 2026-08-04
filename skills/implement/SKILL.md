@@ -38,7 +38,9 @@ Fallback: nested subagents require Claude Code >= 2.1.172. If `gismo:task-lead` 
 
 ## 3. Final verification (yours alone)
 
-When every task has `VERDICT: PASS`:
+When every task-lead has returned `CYCLE: PASS` (deferred or not):
+
+0. **Batch review of deferred tasks** — dispatch ONE `gismo:task-reviewer` with the list of every task that returned `PASS (review deferred)` (`Review: light`/`none`); it writes an `NN-review.md` per task. Any batch `VERDICT: FAIL` goes back through a fresh **full** cycle (`gismo:task-lead` with the task-file and review-file paths) — a task that failed review has outlived its low-risk label. Only proceed when every task, deferred or not, has `VERDICT: PASS` (or, for `none`-level tasks that the batch passed silently, a clean review file).
 
 1. **Plan conformance** — read `plan.md` and the full change (`git diff` / `git status --short`): every item of the file inventory accounted for; deviations found by implementers listed and justified; nothing out of scope. You are the only reviewer who has seen the whole plan — task reviewers only ever saw single tasks, so cross-task integration gaps (mismatched interfaces, duplicated helpers, a test that no longer matches the final API) are YOUR job to catch.
 2. **Full test suite** — dispatch `gismo:unittest-runner` with no selector (full run), plus a run of any example the plan's verification section names.
