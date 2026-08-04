@@ -1,4 +1,4 @@
-# G+Smo task contract (shared by orchestrator, task-leads, implementers, reviewer)
+# G+Smo task contract (shared by orchestrator, spec-writers, task-leads, implementers, reviewer)
 
 Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 
@@ -6,7 +6,7 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 .claude/plans/<slug>/
 ├── plan.md            # the approved plan (context, approach, file inventory, verification)
 ├── tasks/
-│   ├── 01-<name>.md   # task spec (written by the orchestrator)
+│   ├── 01-<name>.md   # task spec (orchestrator decomposes, gismo:spec-writer writes)
 │   ├── 01-report.md   # implementation report (written by the implementer agent)
 │   ├── 01-review.md   # review verdict (written by gismo:task-reviewer)
 │   └── ...
@@ -37,6 +37,24 @@ What must exist / behave differently when this task is done.
 ## Acceptance criteria
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
+
+## Spec-writer protocol (gismo:spec-writer)
+
+The orchestrator decomposes; one spec-writer per task writes the file.
+Dispatched with a decomposition entry (number, one-line goal, `Agent:`, build
+target, test command, dependencies, allowed files) and the plan directory.
+
+1. Read `plan.md` for intent — spec-writers are on the orchestration side and
+   may read it; implementers may not.
+2. Ground every pointer in the real tree: exact paths, signatures, the
+   `file.hpp:120` location of the pattern to imitate, the relevant module map.
+   Cheap lookups may go to `gismo:indexer`; no other agent type.
+3. Never invent a pointer. A plan reference that does not exist in the tree is
+   a **grounding gap**, reported to the orchestrator — not guessed around.
+4. Write `NN-<name>.md` in the format above and return
+   `SPEC: WRITTEN | BLOCKED` plus a `Gaps:` list.
+
+The spec-writer has no Bash tool: it never builds, runs, or configures.
 
 ## Task-lead protocol (gismo:task-lead)
 

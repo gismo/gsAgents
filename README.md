@@ -22,6 +22,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:example-writer` | opus | Runnable drivers in `examples/` |
 | `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
+| `gismo:spec-writer` | sonnet | Expands one decomposition line into a grounded task spec |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
@@ -36,10 +37,16 @@ before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
 reports and reviews stay out of the main session's context; the files under
 `.claude/plans/<slug>/tasks/` remain the audit trail.
 
-Cost control: the orchestrator spawns only `gismo:task-lead` (sonnet) during the
-loop; a task-lead spawns only its task's agent and `gismo:task-reviewer`; the
-three opus implementers may spawn only the sonnet `gismo:indexer`; nobody else
-spawns agents.
+Cost control: the orchestrator spawns only `gismo:spec-writer` (setup) and
+`gismo:task-lead` (loop), both sonnet; a task-lead spawns only its task's agent
+and `gismo:task-reviewer`; spec-writers and the three opus implementers may
+spawn only the sonnet `gismo:indexer`; nobody else spawns agents.
+
+The orchestrator therefore never writes the bulk artifacts: it decomposes the
+plan into one compact line per task and dispatches a `gismo:spec-writer` to
+ground each one against the real tree (exact paths, signatures, patterns to
+imitate). A pointer the plan names but the tree lacks comes back as a
+**grounding gap** before any opus agent is dispatched.
 
 ### Overriding the model tiers
 
