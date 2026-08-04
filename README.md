@@ -22,7 +22,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:example-writer` | opus | Runnable drivers in `examples/` |
 | `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
-| `gismo:spec-writer` | sonnet | Expands one decomposition line into a grounded task spec |
+| `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
@@ -37,10 +37,17 @@ before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
 reports and reviews stay out of the main session's context; the files under
 `.claude/plans/<slug>/tasks/` remain the audit trail.
 
-Cost control: the orchestrator spawns only `gismo:spec-writer` (setup) and
-`gismo:task-lead` (loop), both sonnet; a task-lead spawns only its task's agent
-and `gismo:task-reviewer`; spec-writers and the three opus implementers may
-spawn only the sonnet `gismo:indexer`; nobody else spawns agents.
+Cost control: the orchestrator spawns only `gismo:spec-writer` (setup, opus —
+the spec is where the framework's intelligence lives) and `gismo:task-lead`
+(loop, sonnet); a task-lead spawns only its task's agent and
+`gismo:task-reviewer`; spec-writers and the three opus implementers may spawn
+only the sonnet `gismo:indexer`; nobody else spawns agents.
+
+The ceremony also scales with risk: each task spec carries a `Review:` level
+(`full` adversarial cycle / `light` evidence-audit + diff read / `none` for
+doc-only tasks), fixed by the orchestrator at decomposition time — so a
+trivial task no longer pays the full implement-and-attack cycle, while
+library code keeps the strict gate.
 
 The orchestrator therefore never writes the bulk artifacts: it decomposes the
 plan into one compact line per task and dispatches a `gismo:spec-writer` to

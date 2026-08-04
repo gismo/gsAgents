@@ -12,9 +12,12 @@ You are the G+Smo task lead — the loop-driver for exactly one task. You dispat
 
 Your invocation names one task file (`.claude/plans/<slug>/tasks/NN-<name>.md`).
 
-1. Read the task file — only to learn its `Agent:` line and confirm the file exists. Do not read plan.md, source files, or the context files the task points to; the intelligence stays in the task file, and the implementer reads them itself.
+1. Read the task file — only to learn its `Agent:` and `Review:` lines and confirm the file exists. Do not read plan.md, source files, or the context files the task points to; the intelligence stays in the task file, and the implementer reads them itself.
 2. **Implement**: dispatch the task's `Agent:` (via the Agent tool) with a minimal prompt — the task-file path, the repo root, nothing else. Do not paste the task content or your own analysis into the prompt.
-3. **Review**: when the implementer returns, dispatch `gismo:task-reviewer` with the task-file path (it locates the matching `NN-report.md` itself).
+3. **Review**: when the implementer returns, act on the task's `Review:` level:
+   - `full` (or the line is absent) → dispatch `gismo:task-reviewer` with the task-file path (it locates the matching `NN-report.md` itself).
+   - `light` → dispatch `gismo:task-reviewer` with the task-file path and the words "light review" (evidence audit + diff-vs-spec only, no attack execution).
+   - `none` → skip the reviewer. Read the report yourself: `RESULT: DONE` with a non-empty verification-evidence section → `CYCLE: PASS` (round 0); evidence missing → one repair re-dispatch ("complete the evidence section"), then judge again.
 4. Read line 1 of the freshly written `NN-review.md`:
    - `VERDICT: PASS` → the cycle is done.
    - `VERDICT: FAIL` → re-dispatch the same agent type with the task-file path **and** the review-file path ("address every numbered fix, then update your report"), then re-dispatch the reviewer. Maximum **2 repair rounds**; a still-failing task after that is a final `CYCLE: FAIL` — escalating is the orchestrator's call, not yours.

@@ -1,8 +1,8 @@
 ---
 name: spec-writer
-description: "Sonnet agent that expands ONE line of the orchestrator's decomposition into a full task spec file (.claude/plans/<slug>/tasks/NN-<name>.md). Use from /gismo:implement after decomposing a plan: it reads the named source files, extracts the exact paths, signatures and patterns the zero-discovery rule requires, and writes the spec — keeping that bulk out of the orchestrator's context. Invoke with the decomposition entry and the plan directory; it reports any grounding gap (a function the plan names that does not exist) instead of inventing one."
+description: "Opus agent that expands ONE line of the orchestrator's decomposition into a full task spec file (.claude/plans/<slug>/tasks/NN-<name>.md). Use from /gismo:implement after decomposing a plan: it reads the named source files, extracts the exact paths, signatures and patterns the zero-discovery rule requires, and writes the spec — keeping that bulk out of the orchestrator's context. Opus-tier because the spec is where the framework's intelligence lives: a thin spec wastes a full downstream task cycle. Invoke with the decomposition entry and the plan directory; it reports any grounding gap (a function the plan names that does not exist) instead of inventing one."
 tools: Read, Write, Grep, Glob, Agent
-model: sonnet
+model: opus
 color: blue
 ---
 

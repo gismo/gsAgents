@@ -27,7 +27,7 @@ to this migration.
 | `gismo-example-writer` | opus | runnable drivers in `examples/` |
 | `gismo-task-reviewer` | opus | per-task PASS/FAIL review gate |
 | `gismo-task-lead` | sonnet | per-task loop-driver: implement → review → repair cycles |
-| `gismo-spec-writer` | sonnet | expands one decomposition line into a grounded task spec |
+| `gismo-spec-writer` | opus | expands one decomposition line into a grounded task spec |
 | `gismo-doc-writer` | sonnet | doxygen / tutorials / README |
 | `gismo-builder` | sonnet | guarded make wrapper |
 | `gismo-unittest-runner` | sonnet | build + run + analyse tests |

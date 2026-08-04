@@ -20,6 +20,7 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 Agent: gismo:implementer | gismo:test-writer | gismo:example-writer | gismo:doc-writer
 Build target: <make target to build, or "none">
 Test command: bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh <prefix>   (or "none")
+Review: full | light | none
 Parallelizable-with: <task numbers, or "none">
 
 ## Goal
@@ -37,6 +38,19 @@ What must exist / behave differently when this task is done.
 ## Acceptance criteria
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
+
+The `Review:` level is the orchestrator's cost/robustness dial, fixed at
+decomposition time:
+
+- `full` — the whole adversarial cycle. Default for library code, numerics,
+  and anything a later task builds on.
+- `light` — the reviewer audits the evidence and reads the diff against the
+  spec, but skips the attack-execution phase. For low-risk, well-isolated
+  changes (a small example tweak, mechanical edits with green tests).
+- `none` — no reviewer dispatched; the task-lead accepts a `RESULT: DONE`
+  report whose evidence section is present. For doc-only tasks — the
+  orchestrator's final conformance pass is the only check. Never for code
+  that a test or another task depends on.
 
 ## Spec-writer protocol (gismo:spec-writer)
 
@@ -61,10 +75,12 @@ The spec-writer has no Bash tool: it never builds, runs, or configures.
 One task-lead per task, dispatched by the orchestrator with the task-file path.
 It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
-1. Read the task file's `Agent:` line — nothing else. No plan.md, no source,
-   no context files: the implementer reads them itself.
+1. Read the task file's `Agent:` and `Review:` lines — nothing else. No
+   plan.md, no source, no context files: the implementer reads them itself.
 2. Dispatch that agent with the task-file path; on its return, dispatch
-   `gismo:task-reviewer` with the same path.
+   `gismo:task-reviewer` with the same path (passing "light review" when
+   `Review: light`). On `Review: none`, skip the reviewer: a `RESULT: DONE`
+   report with a non-empty evidence section is `CYCLE: PASS`.
 3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
    paths, then re-review. Maximum **2 repair rounds**, then stop.
 4. `RESULT: BLOCKED` or a reviewer-confirmed spec defect ends the cycle at
