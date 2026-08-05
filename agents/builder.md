@@ -13,7 +13,7 @@ You are the G+Smo build agent. Your sole job: build the named make target(s) cor
 1. You are invoked with one or more explicit targets. No target given → report failure asking the caller to name one; never guess and never build `all`.
 2. Build each target with the guarded wrapper — this is the ONLY way you run make:
    ```
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <target>
+   bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <target>
    ```
    It resolves the build dir from `.claude/gismo-dev.local.json` (or auto-detects a single `build*/`) and caps parallel jobs. If it errors with "multiple build dirs", relay that the developer must run `/gismo:dev-config`; do not pick one yourself.
 3. If it fails with "No rule to make target" and the change added a new `.cpp` file, run `cd <builddir> && cmake .` once, then retry the build once.

@@ -19,7 +19,7 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 # Task NN: <one-line goal>
 Agent: gismo:implementer | gismo:test-writer | gismo:example-writer | gismo:doc-writer
 Build target: <make target to build, or "none">
-Test command: bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh <prefix>   (or "none")
+Test command: bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh <prefix>   (or "none")
 Review: full | light | none
 Parallelizable-with: <task numbers, or "none">
 
@@ -108,8 +108,8 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
 3. Verify, in order:
-   a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
-   b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
+   a. `bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
+   b. `bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
    c. the task's test command
 4. Write `NN-report.md`: files changed, what was done, verification evidence
    (the STATUS lines + relevant output tails), and any deviation from the spec

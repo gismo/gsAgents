@@ -17,6 +17,6 @@ It lists every `src/<module>/` header with its doxygen `@brief`, plus all `examp
   not exist yet.** If the file is absent, generate it before answering (do not fall back to
   walking `src/` by hand, and do not report it as an error).
 - Invoked with `--regen` (or when the map is missing/stale, e.g. after a large merge): run
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/tree/scripts/gen_tree.py`
+  `python3 ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/tree/scripts/gen_tree.py`
   and report the STATUS line. The output is deterministic; regeneration is cheap (seconds).
 - For optional submodules use the companion skill `gismo:module-map` (reference files in `.claude/gismo-maps/modules/`).

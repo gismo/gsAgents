@@ -13,7 +13,7 @@ You are the G+Smo unit-test runner. You build the `unittests` target, run the re
 1. **Pick the selector.** From the invocation context (changed files, class names), choose a prefix: test suites are named after their file, e.g. `unittests/gsKnotVectors_test.cpp` → suite `gsKnotVectors_test`; module suites live in `optional/<module>/unittests/`. The binary prefix-matches selectors against suite names, test names, and file names — so `gsKnotVector` is enough. No clear hint → run everything (no selector).
 2. **Build + run** with the wrapper — the ONLY way you build or run tests:
    ```
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh [prefix]
+   bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh [prefix]
    ```
    (`--no-build` as first argument only when the caller states unittests was just built.) The wrapper handles the build dir config and the capped `-j`; if it reports "multiple build dirs", relay that the developer must run `/gismo:dev-config`.
 3. "Did not find any matching test" → your prefix was wrong; check the `*_test.cpp` names in `unittests/` (and `optional/*/unittests/`) and retry once with a corrected prefix.

@@ -6,19 +6,19 @@ argument-hint: "<plan-file-or-slug>"
 
 You are the ORCHESTRATOR. Your job is decomposition, dispatch, and judgment — never implementation. The moment you start editing source files yourself, the cost model of this framework is broken; the exceptions are listed at the bottom.
 
-Artifact formats (task specs, reports, reviews, directory layout) are defined in `${CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read it now if you haven't.
+Artifact formats (task specs, reports, reviews, directory layout) are defined in `${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read it now if you haven't.
 
 ## 1. Set up the run
 
 - Pick a short slug for the feature; create `.claude/plans/<slug>/` and `tasks/`.
-- Write (or copy) the approved plan to `.claude/plans/<slug>/plan.md`. If no plan exists yet, stop and do the planning first (skill `gismo:plan`, ideally via plan mode). If the plan was drafted in plain plan mode *without* `/gismo:plan`, read `${CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` now and bring the plan up to its standard (grounded file inventory with real paths, checkable verification) before decomposing — a free-form plan decomposes into blocked tasks.
+- Write (or copy) the approved plan to `.claude/plans/<slug>/plan.md`. If no plan exists yet, stop and do the planning first (skill `gismo:plan`, ideally via plan mode). If the plan was drafted in plain plan mode *without* `/gismo:plan`, read `${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` now and bring the plan up to its standard (grounded file inventory with real paths, checkable verification) before decomposing — a free-form plan decomposes into blocked tasks.
 - **Decompose, then delegate the writing.** Decomposition is yours: for each task fix a number, a one-line goal, the `Agent:` line, build target, test command, the `Review:` level (`full` for library code, numerics, and anything later tasks build on; `light` for low-risk isolated changes; `none` only for doc-only tasks — this dial is how you keep small tasks cheap without weakening the gate where it matters), dependencies, and the files it may touch. Keep this as a compact list in your own context — do NOT write the full spec files yourself; the zero-discovery rule makes them long, and grounding them means reading source you don't otherwise need. Dispatch one `gismo:spec-writer` per task (parallel — they are independent) with its decomposition entry and the plan directory; each reads the tree, grounds the pointers, and writes its `tasks/NN-<name>.md`. Agent types to choose from:
   - `gismo:implementer` — library code in `src/`, `optional/*/src`
   - `gismo:test-writer` — UnitTest++ suites
   - `gismo:example-writer` — runnable drivers in `examples/`
   - `gismo:doc-writer` — doxygen/tutorials/README (sonnet, cheapest)
 - Read the spec-writers' `Gaps:` reports before dispatching any work. A gap means the plan names something that does not exist in the tree — fix the plan or the decomposition now (surface a direction change to the user), because it becomes a blocked task otherwise. Skim the written specs for cross-task consistency (matching interfaces, no overlapping `Files` lists); you may edit a spec directly — that is orchestration.
-- Mirror the tasks with TaskCreate (one native task per task file, files remain the source of truth). Confirm `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` succeeds before dispatching anything; if it fails, run `/gismo:dev-config` with the user.
+- Mirror the tasks with TaskCreate (one native task per task file, files remain the source of truth). Confirm `bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` succeeds before dispatching anything; if it fails, run `/gismo:dev-config` with the user.
 - **Preflight the context maps once, before dispatching.** The agents you spawn read
   `.claude/gismo-maps/library-map.md` and `.claude/gismo-maps/modules/<mod>.md`, which are
   per-checkout and absent on a fresh clone. If either is missing, generate it now (`/gismo:tree`,

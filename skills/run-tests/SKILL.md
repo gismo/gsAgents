@@ -8,7 +8,7 @@ allowed-tools: Bash(bash:*)
 Build the `unittests` target and run it:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh [prefix ...]
+bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh [prefix ...]
 ```
 
 - Selectors are **prefix-matched** against suite names, test names, and test source file names (see `unittests/main.cpp`). Suites are conventionally named after their file, e.g. suite `gsMatrixOp_test` lives in `unittests/gsMatrixOp_test.cpp`. So `run_unittests.sh gsKnotVector` runs all knot-vector tests.

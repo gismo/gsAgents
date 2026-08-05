@@ -4,7 +4,7 @@ description: G+Smo planning conventions — how to write a plan.md and decompose
 allowed-tools: Read, Write, Grep, Glob
 ---
 
-You are preparing a G+Smo feature plan for execution by the closed-loop framework (`/gismo:implement`). The full artifact formats are in `${CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read that file now; this skill only adds the planning guidance.
+You are preparing a G+Smo feature plan for execution by the closed-loop framework (`/gismo:implement`). The full artifact formats are in `${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read that file now; this skill only adds the planning guidance.
 
 ## Writing `plan.md`
 

@@ -130,7 +130,7 @@ Return a structured report using this template:
 
 ## G+Smo-Specific Debugging Rules
 
-- **Build directory**: resolve it with `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` (reads `.claude/gismo-dev.local.json`, auto-detects a single `build*/`). If it reports multiple build dirs, relay that the developer must run `/gismo:dev-config` — do not pick one yourself. Note: a `Release` build type (shown by that script) has poor GDB symbol quality; recommend a `RelWithDebInfo`/`Debug` build dir in that case.
+- **Build directory**: resolve it with `bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` (reads `.claude/gismo-dev.local.json`, auto-detects a single `build*/`). If it reports multiple build dirs, relay that the developer must run `/gismo:dev-config` — do not pick one yourself. Note: a `Release` build type (shown by that script) has poor GDB symbol quality; recommend a `RelWithDebInfo`/`Debug` build dir in that case.
 - **Never delete the build directory** without explicit user permission.
 - **Never run `make` proactively**; if the binary is missing, tell the user to build first.
 - **Never run git commands** in worktrees; inform the user if a git action is needed.

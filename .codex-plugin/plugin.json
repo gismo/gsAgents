@@ -1,0 +1,28 @@
+{
+  "name": "gismo",
+  "version": "0.3.0",
+  "description": "G+Smo developer agent framework: cost-tiered agents for implementation, testing, examples, docs and review, plus guarded build/test/syntax-check skills.",
+  "author": {
+    "name": "G+Smo developers",
+    "url": "https://github.com/gismo"
+  },
+  "homepage": "https://github.com/gismo/gsAgents",
+  "repository": "https://github.com/gismo/gsAgents",
+  "license": "MIT",
+  "keywords": ["gismo", "isogeometric-analysis", "c++", "fea"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "G+Smo developer agents",
+    "shortDescription": "Guarded, cost-tiered agents for G+Smo development.",
+    "longDescription": "A closed-loop G+Smo development framework with specialist agents for implementation, tests, examples, documentation and review, plus guarded build and verification skills.",
+    "developerName": "G+Smo developers",
+    "category": "Developer Tools",
+    "capabilities": ["Write", "Run commands"],
+    "defaultPrompt": [
+      "Plan a change to the G+Smo library",
+      "Implement this G+Smo task with verification",
+      "Review this G+Smo change for correctness"
+    ],
+    "websiteURL": "https://github.com/gismo/gsAgents"
+  }
+}

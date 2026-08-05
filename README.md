@@ -2,7 +2,7 @@
 
 # gsAgents — G+Smo developer agent plugin
 
-A Claude Code plugin providing a cost-tiered, closed-loop agent framework for
+A Codex and Claude Code plugin providing a cost-tiered, closed-loop agent framework for
 developing the [G+Smo](https://github.com/gismo/gismo) isogeometric analysis
 library: specialist agents for implementation, testing, examples, docs and
 review, plus guarded build / test / syntax-check skills.
@@ -100,6 +100,18 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 
 ## Installation
 
+### Via Codex
+
+The repository contains a Codex manifest at `.codex-plugin/plugin.json`; the
+root-level `agents/` and `skills/` directories are discovered as plugin
+components. For a local checkout, add the repository's parent as a local plugin
+source through the Codex plugin UI or CLI, then enable the `gismo` plugin. Start
+a new thread after installing so Codex reloads the skills and agents.
+
+Codex skills use the plugin's bundled scripts and retain the same guarded build
+rules as the Claude version. The `CODEX_PLUGIN_ROOT` path is used when Codex
+executes a bundled script; Claude continues to use `CLAUDE_PLUGIN_ROOT`.
+
 ### Via the Claude Code CLI
 
 ```bash
@@ -133,18 +145,19 @@ Opting out (the default, `GISMO_INSTALL_AGENTS=OFF`) leaves your tree untouched.
 
 ```
 gsAgents/
+├── .codex-plugin/plugin.json  # Codex plugin manifest
 ├── .claude-plugin/
 │   ├── plugin.json         # plugin manifest
 │   └── marketplace.json    # this repo doubles as its own marketplace
-├── agents/*.md             # agent definitions (Claude format)
+├── agents/*.md             # shared agent definitions
 ├── skills/<name>/          # SKILL.md + scripts/, per the Agent Skills standard
 ├── cmake/InstallPlugin.cmake
 └── CMakeLists.txt          # optional install flag
 ```
 
 There is **no build or generation step**: the repository *is* the plugin. Skills
-reference their bundled scripts via `${CLAUDE_PLUGIN_ROOT}`, which the CLI
-resolves at load time.
+reference their bundled scripts through the active provider's plugin-root
+environment variable (`CLAUDE_PLUGIN_ROOT` or `CODEX_PLUGIN_ROOT`).
 
 ## Generated context maps
 
@@ -155,6 +168,6 @@ exist yet; the skills generate them on first use.
 
 ## Scope
 
-gsAgents currently targets **Claude Code only**. GitHub Copilot CLI and OpenCode
-were evaluated and deferred — see `PLUGIN_MIGRATION_BRIEF.md` for the provider
-research and the rationale.
+gsAgents currently supports **Codex and Claude Code**. GitHub Copilot CLI and
+OpenCode were evaluated and deferred — see `PLUGIN_MIGRATION_BRIEF.md` for the
+provider research and rationale.

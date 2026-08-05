@@ -20,6 +20,6 @@ Usage rules:
 - **These files are per-checkout and are not shipped with the plugin — on a fresh checkout they
   do not exist yet.** If `index.md` is absent, generate before answering; treat it as a normal
   first-run step, not an error.
-- Regenerate with `python3 ${CLAUDE_PLUGIN_ROOT}/skills/module-map/scripts/gen_module_map.py` when modules were added/enabled or after large submodule updates; report the STATUS line.
+- Regenerate with `python3 ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/module-map/scripts/gen_module_map.py` when modules were added/enabled or after large submodule updates; report the STATUS line.
 
 Submodule specialist convention (hybrid model): a submodule may ship its own agents under `optional/<module>/.claude/agents/`; those are aggregated into the root `.claude/agents/` by cmake (see `cmake/AggregateSubmoduleAgents.cmake`) so they are available when working from the root.

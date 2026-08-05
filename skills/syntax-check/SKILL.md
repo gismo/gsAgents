@@ -8,7 +8,7 @@ allowed-tools: Bash(bash:*)
 Check that C++ files compile, without linking or building anything:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <file> [<file> ...]
+bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <file> [<file> ...]
 ```
 
 - Works on `.cpp` and on headers (`.h`/`.hpp` are wrapped in a temporary translation unit that `#include`s them — so a header must be self-contained to pass, which is a G+Smo requirement anyway).

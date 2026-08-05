@@ -26,7 +26,7 @@ The config file is `.claude/gismo-dev.local.json` at the repo root (gitignored):
 
 4. **Write the config** with the deterministic script (never write the JSON by hand):
    ```
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/set_config.sh <build_dir> <jobs>
+   bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/set_config.sh <build_dir> <jobs>
    ```
 
 5. `set_config.sh` asserts `compile_commands.json` exists in the chosen build dir and, if missing, enables it automatically (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .` — a cache-var flip, no rebuild triggered) before writing the config. This is required: `/gismo:syntax-check` refuses to run without it (exact per-file flags matter — a submodule file must never be checked with the core library's generic flags). Confirm to the user what was set, including the build type of the selected dir.

@@ -8,7 +8,7 @@ allowed-tools: Bash(bash:*)
 Build a G+Smo target by running the guarded wrapper — never call `make` directly:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <target> [jobs]
+bash ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <target> [jobs]
 ```
 
 Rules the wrapper enforces (do not work around them):

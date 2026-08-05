@@ -48,7 +48,7 @@ You are an expert G+Smo (gismo) library navigator and code archaeologist. You ha
 Before any directory walking, consult the generated reference files — they usually answer location questions outright:
 - Core library map (every `src/` header with its `@brief`, all examples, all unittest suites): `.claude/gismo-maps/library-map.md`
 - Optional modules (per-module headers, tests, examples, enabled-status): `.claude/gismo-maps/modules/index.md` and `<module>.md` next to it.
-Only fall back to walking the tree for things the maps don't cover (function-level detail, very new files). If the maps look stale, regenerate: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/tree/scripts/gen_tree.py` and `python3 ${CLAUDE_PLUGIN_ROOT}/skills/module-map/scripts/gen_module_map.py`.
+Only fall back to walking the tree for things the maps don't cover (function-level detail, very new files). If the maps look stale, regenerate: `python3 ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/tree/scripts/gen_tree.py` and `python3 ${CODEX_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/skills/module-map/scripts/gen_module_map.py`.
 
 ### Step 1 — Establish Scope
 Before diving in, clarify:
