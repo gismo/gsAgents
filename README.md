@@ -66,6 +66,36 @@ ground each one against the real tree (exact paths, signatures, patterns to
 imitate). A pointer the plan names but the tree lacks comes back as a
 **grounding gap** before any opus agent is dispatched.
 
+### Recommended: pair the tiers with an advisor
+
+The sonnet tiers above assume a good spec; they get materially better when
+Claude Code's [advisor](https://code.claude.com/docs/en/advisor) is configured,
+because **subagents inherit the session's advisor** and apply the pairing check
+against their own model. With
+
+```json
+{ "advisorModel": "opus" }
+```
+
+in your settings (or `/advisor opus`, or `claude --advisor opus`), every sonnet
+agent in the framework runs the canonical *Sonnet main + Opus advisor* pairing:
+routine turns stay cheap, and the model escalates planning, recurring failures,
+and completion checks to Opus. The advisor sees the full conversation, so it
+costs no context handoff — it is strictly better than delegating the same
+question to a subagent, and the framework does not ship an advisor agent for
+that reason.
+
+Note the pairing rule cuts the other way for the opus agents: an Opus 4.7+ main
+model accepts only another Opus 4.7+ (or Fable) as advisor, so `spec-writer` and
+`task-reviewer` gain nothing from `advisorModel: sonnet`.
+
+**With no advisor configured** the framework still works as designed — it just
+leans harder on its other opus checkpoints. An implementer that hits a judgment
+call the spec left open reports `RESULT: BLOCKED` rather than guessing, and the
+orchestrator repairs the spec; the opus reviewer remains the backstop. That is
+slower than one advisor consult, which is the argument for turning the advisor
+on rather than for adding an agent that guesses in its place.
+
 ### Overriding the model tiers
 
 The `model:` values above are **defaults**, not hard constraints — each is just a

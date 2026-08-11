@@ -109,6 +109,13 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    multi-step exploration. Never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
+   When an advisor is attached to your session (Claude Code's `advisorModel`,
+   which subagents inherit), consult it at the two points that decide the
+   outcome: before committing to a numerical or API approach the spec left
+   open, and before writing your report. Not on routine turns — it re-reads the
+   whole conversation each call. With no advisor attached, an open judgment
+   call is a spec defect: report `RESULT: BLOCKED` and let the orchestrator
+   repair the spec. Never settle it by guessing.
 3. Verify, in order:
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
