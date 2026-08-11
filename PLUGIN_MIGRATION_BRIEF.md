@@ -22,9 +22,9 @@ to this migration.
 
 | Agent | Model | Role |
 |---|---|---|
-| `gismo-implementer` | opus | library code in `src/`, `optional/*/src` |
-| `gismo-test-writer` | opus | UnitTest++ suites |
-| `gismo-example-writer` | opus | runnable drivers in `examples/` |
+| `gismo-implementer` | sonnet | library code in `src/`, `optional/*/src` |
+| `gismo-test-writer` | sonnet | UnitTest++ suites |
+| `gismo-example-writer` | sonnet | runnable drivers in `examples/` |
 | `gismo-task-reviewer` | opus | per-task PASS/FAIL review gate |
 | `gismo-task-lead` | sonnet | per-task loop-driver: implement → review → repair cycles |
 | `gismo-spec-writer` | opus | expands one decomposition line into a grounded task spec |
@@ -33,11 +33,16 @@ to this migration.
 | `gismo-unittest-runner` | sonnet | build + run + analyse tests |
 | `gismo-debugger` | sonnet | GDB / Valgrind |
 | `gismo-indexer` | sonnet | codebase exploration (reads generated maps) |
+| `gismo-scout` | haiku | one-shot factual lookups (file:line, signatures) |
+| `gismo-advisor` | opus | mid-task consultant for the sonnet implementers |
 
 Nesting rule: the orchestrator spawns `gismo-spec-writer` (setup) and
 `gismo-task-lead` (loop), which spawns its task's implementer plus
-`gismo-task-reviewer`; spec-writers and the three opus implementers
-may spawn **only** the sonnet `gismo-indexer`; nobody else may spawn agents.
+`gismo-task-reviewer`; spec-writer, the implementers, the reviewer, doc-writer
+and debugger may spawn the cheap explorers `gismo-scout` (haiku) and
+`gismo-indexer` (sonnet); the implementers additionally consult `gismo-advisor`
+(opus) at two mandatory decision points, capped at 2 per task; explorers and the
+advisor spawn nothing.
 This is a deliberate cost control. (Nested subagents require Claude Code
 >= 2.1.172; depth here peaks at 3 of the allowed 5.)
 The `model:` pins are defaults — a session-wide `CLAUDE_CODE_SUBAGENT_MODEL`

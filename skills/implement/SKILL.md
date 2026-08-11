@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Closed-loop execution of an approved G+Smo plan — the main session decomposes it, dispatches one gismo:spec-writer per task to write the specs and one gismo:task-lead per task to run the implement → review → repair cycle (opus implementers, opus reviewer, sonnet helpers), keeping both off the main context, and ends with a plan-conformance check. Use after plan approval for any multi-step change; pass the plan-file path or slug.
+description: Closed-loop execution of an approved G+Smo plan — the main session decomposes it, dispatches one gismo:spec-writer per task to write the specs and one gismo:task-lead per task to run the implement → review → repair cycle (sonnet implementers against an opus-written spec, opus adversarial reviewer, haiku/sonnet explorers), keeping both off the main context, and ends with a plan-conformance check. Use after plan approval for any multi-step change; pass the plan-file path or slug.
 argument-hint: "<plan-file-or-slug>"
 ---
 
@@ -16,7 +16,7 @@ Artifact formats (task specs, reports, reviews, directory layout) are defined in
   - `gismo:implementer` — library code in `src/`, `optional/*/src`
   - `gismo:test-writer` — UnitTest++ suites
   - `gismo:example-writer` — runnable drivers in `examples/`
-  - `gismo:doc-writer` — doxygen/tutorials/README (sonnet, cheapest)
+  - `gismo:doc-writer` — doxygen/tutorials/README
 - Read the spec-writers' `Gaps:` reports before dispatching any work. A gap means the plan names something that does not exist in the tree — fix the plan or the decomposition now (surface a direction change to the user), because it becomes a blocked task otherwise. Skim the written specs for cross-task consistency (matching interfaces, no overlapping `Files` lists); you may edit a spec directly — that is orchestration.
 - Mirror the tasks with TaskCreate (one native task per task file, files remain the source of truth). Confirm `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` succeeds before dispatching anything; if it fails, run `/gismo:dev-config` with the user.
 - **Preflight the context maps once, before dispatching.** The agents you spawn read
@@ -49,7 +49,7 @@ When every task-lead has returned `CYCLE: PASS` (deferred or not):
 ## Cost discipline
 
 - You (the expensive model) touch: the plan, the decomposition, escalations after a failed cycle, final conformance, summary. Everything else is dispatched — spec *writing* goes to `gismo:spec-writer` and the per-task loop runs inside `gismo:task-lead`, so neither the bulk spec text nor round-by-round reports and reviews consume your context.
-- Exploration questions that come up mid-run go to `gismo:indexer` (sonnet) or the generated maps — not to your own file-reading spree.
+- Exploration questions that come up mid-run go to the generated maps, to `gismo:scout` (haiku) for a settled fact, or to `gismo:indexer` (sonnet) when real exploration is needed — never to your own file-reading spree.
 - Exceptions where you may edit code yourself: a task failed 2 repair rounds; a trivial cross-task integration fix (< ~10 lines) found during final conformance. Anything larger becomes a new task file.
 
 ## Safety

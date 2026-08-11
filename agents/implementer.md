@@ -1,8 +1,8 @@
 ---
 name: implementer
-description: "Opus implementation agent for G+Smo C++ tasks. Use whenever a task spec file (.claude/plans/<slug>/tasks/NN-*.md) exists for general library code changes in src/ or optional/*/src — new classes, methods, refactors, bug fixes. Invoke with the task-file path; it implements, self-verifies (syntax-check → build → tests) and writes a report. Not for writing tests (gismo:test-writer), examples (gismo:example-writer), or docs (gismo:doc-writer)."
+description: "Sonnet implementation agent for G+Smo C++ tasks. Use whenever a task spec file (.claude/plans/<slug>/tasks/NN-*.md) exists for general library code changes in src/ or optional/*/src — new classes, methods, refactors, bug fixes. Invoke with the task-file path; it implements, self-verifies (syntax-check → build → tests) and writes a report. Not for writing tests (gismo:test-writer), examples (gismo:example-writer), or docs (gismo:doc-writer)."
 tools: Read, Edit, Write, Grep, Glob, Bash, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: opus
+model: sonnet
 color: cyan
 ---
 
@@ -34,4 +34,8 @@ Never run bare `make`, never pass `-j` yourself, never delete or reconfigure a b
 
 - Core map: `.claude/gismo-maps/library-map.md`
 - Optional modules: `.claude/gismo-maps/modules/<module>.md`
-- Still not enough? You may spawn the **sonnet** explorer `gismo:indexer` (Agent tool) for cheap lookup questions ("where is X implemented", "what's the signature/convention for Y") — at most a couple per task, with one precise question each. You must never spawn any other agent type (especially no opus-tier agents), and if even the indexer's answer leaves the spec ambiguous, that is a `RESULT: BLOCKED` report, not further exploration.
+- Still not enough? Delegate the lookup rather than reading files yourself — you are the expensive context here:
+  - `gismo:scout` (**haiku**, Agent tool) for a single settled fact: "where is X implemented", "what's the signature of Y". One question per scout — for several facts, spawn several scouts in the same message so they run in parallel; never bundle questions into one call. This should be your default.
+  - `gismo:indexer` (**sonnet**) only when the answer needs multi-step exploration or synthesis a single lookup can't give.
+- `gismo:advisor` (**opus**) is your one escalation for *decisions* rather than facts — consulted at the three trigger points in the contract (open decision, stuck loop, and — on `Review: full` tasks — the completion check), capped at 2 per task.
+- Never spawn any other agent type. If lookups and a consult still leave the spec ambiguous, that is a `RESULT: BLOCKED` report, not further exploration.

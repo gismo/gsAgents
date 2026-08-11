@@ -69,7 +69,8 @@ target, test command, dependencies, allowed files) and the plan directory.
    may read it; implementers may not.
 2. Ground every pointer in the real tree: exact paths, signatures, the
    `file.hpp:120` location of the pattern to imitate, the relevant module map.
-   Cheap lookups may go to `gismo:indexer`; no other agent type.
+   Delegate the lookups — `gismo:scout` (haiku) per fact, `gismo:indexer`
+   (sonnet) when exploration is needed; no other agent type.
 3. Never invent a pointer. A plan reference that does not exist in the tree is
    a **grounding gap**, reported to the orchestrator — not guessed around.
 4. Write `NN-<name>.md` in the format above and return
@@ -102,11 +103,43 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 ## Implementer protocol (all implementer agents)
 
 1. Read YOUR task file only, plus the context it points to. Never read plan.md.
-   For small factual gaps (a location, a signature, a convention) opus
-   implementers may spawn the cheaper `gismo:indexer` — a couple of precise
-   questions per task at most; never any other agent type.
+   For small factual gaps (a location, a signature, a convention) spawn
+   `gismo:scout` (haiku) — one question per scout, so several facts mean
+   several scouts dispatched in the same message, never several questions in
+   one call — and `gismo:indexer` (sonnet) only when the answer needs
+   multi-step exploration. Never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
+   **Advice comes from exactly one source, chosen by config — never two.**
+   `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` prints
+   `GISMO_ADVISOR` (you already run this via the build scripts):
+   - `GISMO_ADVISOR=native` — Claude Code's own advisor is configured and
+     subagents inherit it, so it is already advising you. **Do not consult
+     `gismo:advisor`**; note `Advisor: native` in your report and move on.
+   - `GISMO_ADVISOR=agent` (the default) — no native advisor is configured.
+     Consult `gismo:advisor` (opus) at the trigger points below.
+
+   Three trigger points — the first two fire on need, the third on risk:
+   a. **Open decision.** Whenever you are about to commit to a numerical or API
+      approach the spec left open — before you write the code, not after.
+   b. **Stuck loop.** After two failed build or test cycles against the *same*
+      error, consult before attempting a third. A third identical attempt is
+      rarely the one that works, and this is the cheapest moment to be told you
+      are attacking the wrong layer.
+   c. **Completion check**, before writing your report: **mandatory on
+      `Review: full` tasks**, optional on `light`/`none` — those carry little
+      enough risk that the deferred batch review is proportionate, and an opus
+      consult to bless a trivial change is not.
+   Pass the task-file path, the decision, and the options you are weighing; it
+   reads the spec and your diff itself. At most **2 consults per task** — it is
+   the most expensive agent you can reach, so if several triggers fire, spend
+   them on the earliest ones: advice before the code is written is worth more
+   than advice after.
+   Act on its verdict line: `ADVICE: PROCEED` → follow the recommendation;
+   `ADVICE: SPEC DECIDES` → you misread the spec, follow the spec;
+   `ADVICE: BLOCKED` → report `RESULT: BLOCKED` relaying its reasoning. Record
+   every consult's verdict line in your report so the reviewer can see what was
+   advised. Never settle an open judgment call by guessing.
 3. Verify, in order:
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
@@ -145,7 +178,10 @@ each, plus cross-task consistency notes). Both follow:
    Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
    G+Smo conventions, no out-of-scope files touched, no scope creep, and — on
    test tasks — falsification evidence (each new test observed to FAIL once,
-   per the test-writer's protocol) present in the report.
+   per the test-writer's protocol) present in the report. The report should
+   also carry the `gismo:advisor` verdict lines; advice that was solicited and
+   then ignored is worth a note, and a decision the implementer clearly made
+   alone is worth a look.
 
 ## Build safety (absolute, for every agent)
 

@@ -17,9 +17,9 @@ parallelism has exhausted RAM and crashed machines).
 
 | Agent | Tier | Role |
 |---|---|---|
-| `gismo:implementer` | opus | Library code in `src/`, `optional/*/src` |
-| `gismo:test-writer` | opus | UnitTest++ suites |
-| `gismo:example-writer` | opus | Runnable drivers in `examples/` |
+| `gismo:implementer` | sonnet | Library code in `src/`, `optional/*/src` |
+| `gismo:test-writer` | sonnet | UnitTest++ suites |
+| `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
 | `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
 | `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
@@ -28,6 +28,8 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
 | `gismo:debugger` | sonnet | GDB / Valgrind |
 | `gismo:indexer` | sonnet | Codebase exploration (reads generated maps) |
+| `gismo:scout` | haiku | One-shot factual lookups (`file:line`, signatures) |
+| `gismo:advisor` | opus | Mid-task consultant for the sonnet implementers |
 
 The per-task closed loop runs as **nested subagents** (requires Claude Code
 >= 2.1.172): `/gismo:implement` dispatches one `gismo:task-lead` per task,
@@ -37,11 +39,20 @@ before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
 reports and reviews stay out of the main session's context; the files under
 `.claude/plans/<slug>/tasks/` remain the audit trail.
 
-Cost control: the orchestrator spawns only `gismo:spec-writer` (setup, opus —
-the spec is where the framework's intelligence lives) and `gismo:task-lead`
-(loop, sonnet); a task-lead spawns only its task's agent and
-`gismo:task-reviewer`; spec-writers and the three opus implementers may spawn
-only the sonnet `gismo:indexer`; nobody else spawns agents.
+Cost control rests on an asymmetry: **writing is cheap, checking is expensive.**
+A well-grounded spec (opus `gismo:spec-writer`) lets the three implementers run
+on sonnet, while the adversarial gate that has to catch what they missed stays
+on opus (`gismo:task-reviewer`). The loop-driver is sonnet — it only dispatches
+and reads verdicts.
+
+Every working agent may delegate lookups downward instead of reading the library
+itself: `gismo:scout` (haiku) answers one settled fact per call with a
+`file:line` citation, and `gismo:indexer` (sonnet) handles questions that need
+real exploration. Spawn rules: the orchestrator spawns spec-writers and
+task-leads; a task-lead spawns its task's agent and the reviewer; spec-writer,
+the implementers, the reviewer, doc-writer and debugger may spawn scout and
+indexer; the three implementers may additionally spawn `gismo:advisor` (opus,
+capped at 2 per task); scout, indexer and advisor spawn nothing.
 
 The ceremony also scales with risk: each task spec carries a `Review:` level,
 fixed by the orchestrator at decomposition time. `full` tasks get the
@@ -56,6 +67,70 @@ plan into one compact line per task and dispatches a `gismo:spec-writer` to
 ground each one against the real tree (exact paths, signatures, patterns to
 imitate). A pointer the plan names but the tree lacks comes back as a
 **grounding gap** before any opus agent is dispatched.
+
+### Advice for the sonnet implementers — exactly one advisor
+
+The sonnet tiers assume a good spec. Where the spec runs out, the implementers
+get advice rather than guessing — from **one** source, never two. Which one is
+a config switch, `advisor` in `.claude/gismo-dev.local.json` (set by
+`/gismo:dev-config`, surfaced to every agent as `GISMO_ADVISOR`):
+
+| `advisor` | Who advises | Use when |
+|---|---|---|
+| `agent` (default) | The `gismo:advisor` subagent, at two mandatory points | No Claude Code advisor configured |
+| `native` | Claude Code's own advisor, inherited by every subagent | You have `advisorModel` set |
+
+Set it to `native` if you run with `advisorModel`, and the implementers skip
+`gismo:advisor` entirely — you are advised once, by the better mechanism. Run
+`/gismo:dev-config` again after `/advisor off` to switch back.
+
+**`gismo:advisor` (opus) — the shipped fallback.** Three trigger points, capped
+at 2 consults per task — the first two fire on need, the third on risk:
+
+| Trigger | When |
+|---|---|
+| Open decision | About to commit to a numerical or API approach the spec left open — before the code is written |
+| Stuck loop | Two failed build/test cycles on the same error, before a third attempt |
+| Completion check | Before writing the report — mandatory on `Review: full`, optional on `light`/`none` |
+
+The middle trigger mirrors a heuristic Claude's native advisor uses, and it is
+where a cheaper model gains most: told which *layer* the problem is in rather
+than handed a third variation of the same fix. The third is risk-scaled for the
+same reason `Review:` is — a trivial change should not buy an opus opinion to
+bless it. Unlike a reviewer it
+is consultative, not binding, and it runs *during* the work so a defect is
+fixed before the report rather than bouncing back through a repair round. It
+reads the task spec and the working diff itself instead of trusting the
+caller's summary, and answers with one of three verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `ADVICE: PROCEED` | The call is within the implementer's latitude — recommendation + next step |
+| `ADVICE: SPEC DECIDES` | The spec already settles it; the implementer misread it |
+| `ADVICE: BLOCKED` | The spec is genuinely defective — report `RESULT: BLOCKED`, orchestrator repairs it |
+
+That third verdict is the point: the advisor never invents a decision the spec
+should have made, so consulting it cannot quietly paper over a spec defect.
+Verdict lines go into the report, where the reviewer can see what was advised
+and whether it was followed.
+
+**Claude Code's native [advisor](https://code.claude.com/docs/en/advisor) — the
+better mechanism when you have it.** Set
+
+```json
+{ "advisorModel": "opus" }
+```
+
+(or `/advisor opus`, or `claude --advisor opus`) and **subagents inherit it**,
+so every sonnet agent runs the canonical *Sonnet main + Opus advisor* pairing.
+It sees the full conversation, so it costs no context handoff and needs no
+summarising by the caller. Its one limitation is that Claude decides when to
+call it — there is no way to force a consult — which is why the framework ships
+`gismo:advisor` for setups that don't have it.
+
+Note the pairing rule cuts the other way for the opus agents: an Opus 4.7+ main
+accepts only another Opus 4.7+ (or Fable) as advisor, so `spec-writer` and
+`task-reviewer` gain nothing from `advisorModel: sonnet`.
 
 ### Overriding the model tiers
 

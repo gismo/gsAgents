@@ -1,7 +1,7 @@
 ---
 name: dev-config
-description: Set or switch the G+Smo build directory (e.g. debug vs release) and the parallel-jobs cap used by all agent build scripts. Writes .claude/gismo-dev.local.json. Run when there are multiple build dirs, after creating a new one, or to change the -j limit.
-argument-hint: "[build_dir] [jobs]"
+description: Set or switch the G+Smo build directory (e.g. debug vs release), the parallel-jobs cap used by all agent build scripts, and which advisor the implementers use. Writes .claude/gismo-dev.local.json. Run when there are multiple build dirs, after creating a new one, to change the -j limit, or after enabling/disabling Claude Code's advisorModel.
+argument-hint: "[build_dir] [jobs] [agent|native]"
 allowed-tools: Bash(bash:*), Bash(find:*), Bash(grep:*), Bash(nproc)
 ---
 
@@ -9,7 +9,7 @@ You configure the per-developer local settings that every G+Smo agent script rea
 
 The config file is `.claude/gismo-dev.local.json` at the repo root (gitignored):
 ```json
-{ "build_dir": "/abs/path/to/build", "jobs": 4 }
+{ "build_dir": "/abs/path/to/build", "jobs": 4, "advisor": "agent" }
 ```
 
 ## Steps
@@ -24,9 +24,15 @@ The config file is `.claude/gismo-dev.local.json` at the repo root (gitignored):
 
 3. **Ask the user** which build dir to use, and how many parallel jobs. For jobs, offer 1 / 2 / 4 (default) and note the hard cap: scripts clamp to `nproc/2` because unbounded `-j` has crashed machines by exhausting RAM.
 
+   Also ask **who advises the sonnet implementers**, because they must have exactly one advisor, not two:
+   - `agent` (default) — no Claude Code advisor configured; implementers consult the `gismo:advisor` subagent at two mandatory points.
+   - `native` — the user has `advisorModel` set (or runs `/advisor` / `--advisor`); subagents inherit it, so implementers skip `gismo:advisor` and rely on the native one.
+
+   Check before asking: `grep -h advisorModel ~/.claude/settings.json .claude/settings.json 2>/dev/null` — a hit means `native` is the right answer. If the user later runs `/advisor off`, re-run this skill to switch back to `agent`.
+
 4. **Write the config** with the deterministic script (never write the JSON by hand):
    ```
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/set_config.sh <build_dir> <jobs>
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/set_config.sh <build_dir> <jobs> [agent|native]
    ```
 
 5. `set_config.sh` asserts `compile_commands.json` exists in the chosen build dir and, if missing, enables it automatically (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .` — a cache-var flip, no rebuild triggered) before writing the config. This is required: `/gismo:syntax-check` refuses to run without it (exact per-file flags matter — a submodule file must never be checked with the core library's generic flags). Confirm to the user what was set, including the build type of the selected dir.
