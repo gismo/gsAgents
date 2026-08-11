@@ -29,6 +29,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:debugger` | sonnet | GDB / Valgrind |
 | `gismo:indexer` | sonnet | Codebase exploration (reads generated maps) |
 | `gismo:scout` | haiku | One-shot factual lookups (`file:line`, signatures) |
+| `gismo:advisor` | opus | Mid-task consultant for the sonnet implementers |
 
 The per-task closed loop runs as **nested subagents** (requires Claude Code
 >= 2.1.172): `/gismo:implement` dispatches one `gismo:task-lead` per task,
@@ -50,7 +51,8 @@ itself: `gismo:scout` (haiku) answers one settled fact per call with a
 real exploration. Spawn rules: the orchestrator spawns spec-writers and
 task-leads; a task-lead spawns its task's agent and the reviewer; spec-writer,
 the implementers, the reviewer, doc-writer and debugger may spawn scout and
-indexer; scout and indexer spawn nothing.
+indexer; the three implementers may additionally spawn `gismo:advisor` (opus,
+capped at 2 per task); scout, indexer and advisor spawn nothing.
 
 The ceremony also scales with risk: each task spec carries a `Review:` level,
 fixed by the orchestrator at decomposition time. `full` tasks get the
@@ -66,35 +68,52 @@ ground each one against the real tree (exact paths, signatures, patterns to
 imitate). A pointer the plan names but the tree lacks comes back as a
 **grounding gap** before any opus agent is dispatched.
 
-### Recommended: pair the tiers with an advisor
+### Advice for the sonnet implementers — two layers
 
-The sonnet tiers above assume a good spec; they get materially better when
-Claude Code's [advisor](https://code.claude.com/docs/en/advisor) is configured,
-because **subagents inherit the session's advisor** and apply the pairing check
-against their own model. With
+The sonnet tiers assume a good spec. Where the spec runs out, the implementers
+get advice rather than guessing, from two independent mechanisms.
+
+**1. `gismo:advisor` (opus) — always on, shipped with the plugin.** Every
+implementer consults it at two points: before committing to a numerical or API
+approach the spec left open, and once before writing its report. Capped at 2
+consults per task. Unlike a reviewer it is consultative, not binding, and it
+runs *during* the work so a defect is fixed before the report rather than
+bouncing back through a repair round. It reads the task spec and the working
+diff itself instead of trusting the caller's summary, and answers with one of
+three verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `ADVICE: PROCEED` | The call is within the implementer's latitude — recommendation + next step |
+| `ADVICE: SPEC DECIDES` | The spec already settles it; the implementer misread it |
+| `ADVICE: BLOCKED` | The spec is genuinely defective — report `RESULT: BLOCKED`, orchestrator repairs it |
+
+That third verdict is the point: the advisor never invents a decision the spec
+should have made, so consulting it cannot quietly paper over a spec defect.
+Verdict lines go into the report, where the reviewer can see what was advised
+and whether it was followed.
+
+**2. Claude Code's native [advisor](https://code.claude.com/docs/en/advisor) —
+recommended, complementary.** Set
 
 ```json
 { "advisorModel": "opus" }
 ```
 
-in your settings (or `/advisor opus`, or `claude --advisor opus`), every sonnet
-agent in the framework runs the canonical *Sonnet main + Opus advisor* pairing:
-routine turns stay cheap, and the model escalates planning, recurring failures,
-and completion checks to Opus. The advisor sees the full conversation, so it
-costs no context handoff — it is strictly better than delegating the same
-question to a subagent, and the framework does not ship an advisor agent for
-that reason.
+(or `/advisor opus`, or `claude --advisor opus`) and **subagents inherit it**,
+so every sonnet agent runs the canonical *Sonnet main + Opus advisor* pairing.
+It sees the full conversation and costs no context handoff, but Claude decides
+when to call it — which is exactly why it does not replace layer 1: it cannot
+guarantee a consult happens. Use both; they cover different failure modes.
 
 Note the pairing rule cuts the other way for the opus agents: an Opus 4.7+ main
-model accepts only another Opus 4.7+ (or Fable) as advisor, so `spec-writer` and
+accepts only another Opus 4.7+ (or Fable) as advisor, so `spec-writer` and
 `task-reviewer` gain nothing from `advisorModel: sonnet`.
 
-**With no advisor configured** the framework still works as designed — it just
-leans harder on its other opus checkpoints. An implementer that hits a judgment
-call the spec left open reports `RESULT: BLOCKED` rather than guessing, and the
-orchestrator repairs the spec; the opus reviewer remains the backstop. That is
-slower than one advisor consult, which is the argument for turning the advisor
-on rather than for adding an agent that guesses in its place.
+Running both layers means some overlap. If that proves wasteful for your
+workload, drop the mandatory pre-report consult to optional in
+`skills/implement/TASK_CONTRACT.md` — the approach consult is the one that
+saves whole repair rounds.
 
 ### Overriding the model tiers
 

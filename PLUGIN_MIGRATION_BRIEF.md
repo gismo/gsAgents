@@ -34,12 +34,15 @@ to this migration.
 | `gismo-debugger` | sonnet | GDB / Valgrind |
 | `gismo-indexer` | sonnet | codebase exploration (reads generated maps) |
 | `gismo-scout` | haiku | one-shot factual lookups (file:line, signatures) |
+| `gismo-advisor` | opus | mid-task consultant for the sonnet implementers |
 
 Nesting rule: the orchestrator spawns `gismo-spec-writer` (setup) and
 `gismo-task-lead` (loop), which spawns its task's implementer plus
 `gismo-task-reviewer`; spec-writer, the implementers, the reviewer, doc-writer
 and debugger may spawn the cheap explorers `gismo-scout` (haiku) and
-`gismo-indexer` (sonnet); the explorers spawn nothing.
+`gismo-indexer` (sonnet); the implementers additionally consult `gismo-advisor`
+(opus) at two mandatory decision points, capped at 2 per task; explorers and the
+advisor spawn nothing.
 This is a deliberate cost control. (Nested subagents require Claude Code
 >= 2.1.172; depth here peaks at 3 of the allowed 5.)
 The `model:` pins are defaults — a session-wide `CLAUDE_CODE_SUBAGENT_MODEL`

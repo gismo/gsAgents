@@ -109,13 +109,19 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    multi-step exploration. Never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
-   When an advisor is attached to your session (Claude Code's `advisorModel`,
-   which subagents inherit), consult it at the two points that decide the
-   outcome: before committing to a numerical or API approach the spec left
-   open, and before writing your report. Not on routine turns — it re-reads the
-   whole conversation each call. With no advisor attached, an open judgment
-   call is a spec defect: report `RESULT: BLOCKED` and let the orchestrator
-   repair the spec. Never settle it by guessing.
+   **Consult `gismo:advisor` (opus) — mandatory, and independent of whether a
+   native advisor is attached to your session.** Two points:
+   a. Whenever you are about to commit to a numerical or API approach the spec
+      left open — before you write the code, not after.
+   b. Once before writing your report, as a completion check.
+   Pass the task-file path, the decision, and the options you are weighing; it
+   reads the spec and your diff itself. At most **2 consults per task** — it is
+   the most expensive agent you can reach.
+   Act on its verdict line: `ADVICE: PROCEED` → follow the recommendation;
+   `ADVICE: SPEC DECIDES` → you misread the spec, follow the spec;
+   `ADVICE: BLOCKED` → report `RESULT: BLOCKED` relaying its reasoning. Record
+   every consult's verdict line in your report so the reviewer can see what was
+   advised. Never settle an open judgment call by guessing.
 3. Verify, in order:
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
@@ -154,7 +160,10 @@ each, plus cross-task consistency notes). Both follow:
    Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
    G+Smo conventions, no out-of-scope files touched, no scope creep, and — on
    test tasks — falsification evidence (each new test observed to FAIL once,
-   per the test-writer's protocol) present in the report.
+   per the test-writer's protocol) present in the report. The report should
+   also carry the `gismo:advisor` verdict lines; advice that was solicited and
+   then ignored is worth a note, and a decision the implementer clearly made
+   alone is worth a look.
 
 ## Build safety (absolute, for every agent)
 

@@ -37,4 +37,5 @@ Never run bare `make`, never pass `-j` yourself, never delete or reconfigure a b
 - Still not enough? Delegate the lookup rather than reading files yourself — you are the expensive context here:
   - `gismo:scout` (**haiku**, Agent tool) for a single settled fact: "where is X implemented", "what's the signature of Y". One question per call; spawn several in one message when you have several. This should be your default.
   - `gismo:indexer` (**sonnet**) only when the answer needs multi-step exploration or synthesis a single lookup can't give.
-- Never spawn any other agent type (especially no opus-tier agents). If the answers still leave the spec ambiguous, that is a `RESULT: BLOCKED` report, not further exploration.
+- `gismo:advisor` (**opus**) is your one escalation for *decisions* rather than facts — mandatory at the two points in the contract, capped at 2 per task.
+- Never spawn any other agent type. If lookups and a consult still leave the spec ambiguous, that is a `RESULT: BLOCKED` report, not further exploration.
