@@ -17,9 +17,9 @@ parallelism has exhausted RAM and crashed machines).
 
 | Agent | Tier | Role |
 |---|---|---|
-| `gismo:implementer` | opus | Library code in `src/`, `optional/*/src` |
-| `gismo:test-writer` | opus | UnitTest++ suites |
-| `gismo:example-writer` | opus | Runnable drivers in `examples/` |
+| `gismo:implementer` | sonnet | Library code in `src/`, `optional/*/src` |
+| `gismo:test-writer` | sonnet | UnitTest++ suites |
+| `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
 | `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
 | `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
@@ -28,6 +28,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
 | `gismo:debugger` | sonnet | GDB / Valgrind |
 | `gismo:indexer` | sonnet | Codebase exploration (reads generated maps) |
+| `gismo:scout` | haiku | One-shot factual lookups (`file:line`, signatures) |
 
 The per-task closed loop runs as **nested subagents** (requires Claude Code
 >= 2.1.172): `/gismo:implement` dispatches one `gismo:task-lead` per task,
@@ -37,11 +38,19 @@ before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
 reports and reviews stay out of the main session's context; the files under
 `.claude/plans/<slug>/tasks/` remain the audit trail.
 
-Cost control: the orchestrator spawns only `gismo:spec-writer` (setup, opus —
-the spec is where the framework's intelligence lives) and `gismo:task-lead`
-(loop, sonnet); a task-lead spawns only its task's agent and
-`gismo:task-reviewer`; spec-writers and the three opus implementers may spawn
-only the sonnet `gismo:indexer`; nobody else spawns agents.
+Cost control rests on an asymmetry: **writing is cheap, checking is expensive.**
+A well-grounded spec (opus `gismo:spec-writer`) lets the three implementers run
+on sonnet, while the adversarial gate that has to catch what they missed stays
+on opus (`gismo:task-reviewer`). The loop-driver is sonnet — it only dispatches
+and reads verdicts.
+
+Every working agent may delegate lookups downward instead of reading the library
+itself: `gismo:scout` (haiku) answers one settled fact per call with a
+`file:line` citation, and `gismo:indexer` (sonnet) handles questions that need
+real exploration. Spawn rules: the orchestrator spawns spec-writers and
+task-leads; a task-lead spawns its task's agent and the reviewer; spec-writer,
+the implementers, the reviewer, doc-writer and debugger may spawn scout and
+indexer; scout and indexer spawn nothing.
 
 The ceremony also scales with risk: each task spec carries a `Review:` level,
 fixed by the orchestrator at decomposition time. `full` tasks get the

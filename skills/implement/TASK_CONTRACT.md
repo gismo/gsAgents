@@ -69,7 +69,8 @@ target, test command, dependencies, allowed files) and the plan directory.
    may read it; implementers may not.
 2. Ground every pointer in the real tree: exact paths, signatures, the
    `file.hpp:120` location of the pattern to imitate, the relevant module map.
-   Cheap lookups may go to `gismo:indexer`; no other agent type.
+   Delegate the lookups — `gismo:scout` (haiku) per fact, `gismo:indexer`
+   (sonnet) when exploration is needed; no other agent type.
 3. Never invent a pointer. A plan reference that does not exist in the tree is
    a **grounding gap**, reported to the orchestrator — not guessed around.
 4. Write `NN-<name>.md` in the format above and return
@@ -102,9 +103,10 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 ## Implementer protocol (all implementer agents)
 
 1. Read YOUR task file only, plus the context it points to. Never read plan.md.
-   For small factual gaps (a location, a signature, a convention) opus
-   implementers may spawn the cheaper `gismo:indexer` — a couple of precise
-   questions per task at most; never any other agent type.
+   For small factual gaps (a location, a signature, a convention) spawn
+   `gismo:scout` (haiku) — one question per call, several in one message when
+   you have several — and `gismo:indexer` (sonnet) only when the answer needs
+   multi-step exploration. Never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
 3. Verify, in order:

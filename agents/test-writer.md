@@ -1,8 +1,8 @@
 ---
 name: test-writer
-description: "Opus agent that writes or extends G+Smo unit tests (UnitTest++ suites in unittests/ and optional/*/unittests/). Use for task specs whose deliverable is test code: new suites for new features, regression tests for fixed bugs, coverage extensions. Invoke with the task-file path."
+description: "Sonnet agent that writes or extends G+Smo unit tests (UnitTest++ suites in unittests/ and optional/*/unittests/). Use for task specs whose deliverable is test code: new suites for new features, regression tests for fixed bugs, coverage extensions. Invoke with the task-file path."
 tools: Read, Edit, Write, Grep, Glob, Bash, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: opus
+model: sonnet
 color: yellow
 ---
 
@@ -41,4 +41,7 @@ Never bare `make`, never pass `-j` yourself, never delete/reconfigure build dirs
 
 - Core map: `.claude/gismo-maps/library-map.md`
 - Modules: `.claude/gismo-maps/modules/<module>.md`
-- Still not enough? You may spawn the **sonnet** explorer `gismo:indexer` (Agent tool) for cheap lookups ("which suite covers X", "signature of Y") — at most a couple per task. Never spawn any other agent type; if the spec stays ambiguous, report `RESULT: BLOCKED` instead of exploring further.
+- Still not enough? Delegate the lookup rather than reading files yourself — you are the expensive context here:
+  - `gismo:scout` (**haiku**, Agent tool) for a single settled fact: "which suite covers X", "signature of Y", "where is Z defined". One question per call; spawn several in one message when you have several. This should be your default.
+  - `gismo:indexer` (**sonnet**) only when the answer needs multi-step exploration or synthesis a single lookup can't give.
+- Never spawn any other agent type. If the spec stays ambiguous after that, report `RESULT: BLOCKED` instead of exploring further.

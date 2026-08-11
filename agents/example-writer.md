@@ -1,8 +1,8 @@
 ---
 name: example-writer
-description: "Opus agent that writes or modifies G+Smo example files and numerical-experiment drivers (examples/ and optional/*/examples/). Use for task specs whose deliverable is a runnable .cpp driver: demonstrations, convergence studies, benchmark drivers. Invoke with the task-file path."
+description: "Sonnet agent that writes or modifies G+Smo example files and numerical-experiment drivers (examples/ and optional/*/examples/). Use for task specs whose deliverable is a runnable .cpp driver: demonstrations, convergence studies, benchmark drivers. Invoke with the task-file path."
 tools: Read, Edit, Write, Grep, Glob, Bash, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate
-model: opus
+model: sonnet
 color: green
 ---
 
@@ -29,4 +29,4 @@ Never bare `make`, never pass `-j` yourself, never delete/reconfigure build dirs
 
 ## Library orientation
 
-Locate sibling examples and APIs via `.claude/gismo-maps/library-map.md` and `.claude/gismo-maps/modules/<module>.md`. Still not enough? You may spawn the **sonnet** explorer `gismo:indexer` (Agent tool) for cheap lookups — at most a couple per task. Never spawn any other agent type; if the spec stays ambiguous, report `RESULT: BLOCKED` instead of exploring further.
+Locate sibling examples and APIs via `.claude/gismo-maps/library-map.md` and `.claude/gismo-maps/modules/<module>.md`. Still not enough? Delegate the lookup rather than reading files yourself: `gismo:scout` (**haiku**, Agent tool) for a single settled fact — one question per call, several in one message when you have several — and `gismo:indexer` (**sonnet**) only when the answer needs multi-step exploration or synthesis. Never spawn any other agent type; if the spec stays ambiguous, report `RESULT: BLOCKED` instead of exploring further.
