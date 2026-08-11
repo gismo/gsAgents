@@ -68,19 +68,29 @@ ground each one against the real tree (exact paths, signatures, patterns to
 imitate). A pointer the plan names but the tree lacks comes back as a
 **grounding gap** before any opus agent is dispatched.
 
-### Advice for the sonnet implementers — two layers
+### Advice for the sonnet implementers — exactly one advisor
 
 The sonnet tiers assume a good spec. Where the spec runs out, the implementers
-get advice rather than guessing, from two independent mechanisms.
+get advice rather than guessing — from **one** source, never two. Which one is
+a config switch, `advisor` in `.claude/gismo-dev.local.json` (set by
+`/gismo:dev-config`, surfaced to every agent as `GISMO_ADVISOR`):
 
-**1. `gismo:advisor` (opus) — always on, shipped with the plugin.** Every
-implementer consults it at two points: before committing to a numerical or API
-approach the spec left open, and once before writing its report. Capped at 2
-consults per task. Unlike a reviewer it is consultative, not binding, and it
-runs *during* the work so a defect is fixed before the report rather than
-bouncing back through a repair round. It reads the task spec and the working
-diff itself instead of trusting the caller's summary, and answers with one of
-three verdicts:
+| `advisor` | Who advises | Use when |
+|---|---|---|
+| `agent` (default) | The `gismo:advisor` subagent, at two mandatory points | No Claude Code advisor configured |
+| `native` | Claude Code's own advisor, inherited by every subagent | You have `advisorModel` set |
+
+Set it to `native` if you run with `advisorModel`, and the implementers skip
+`gismo:advisor` entirely — you are advised once, by the better mechanism. Run
+`/gismo:dev-config` again after `/advisor off` to switch back.
+
+**`gismo:advisor` (opus) — the shipped fallback.** Consulted at two points:
+before committing to a numerical or API approach the spec left open, and once
+before writing the report. Capped at 2 consults per task. Unlike a reviewer it
+is consultative, not binding, and it runs *during* the work so a defect is
+fixed before the report rather than bouncing back through a repair round. It
+reads the task spec and the working diff itself instead of trusting the
+caller's summary, and answers with one of three verdicts:
 
 | Verdict | Meaning |
 |---|---|
@@ -93,8 +103,8 @@ should have made, so consulting it cannot quietly paper over a spec defect.
 Verdict lines go into the report, where the reviewer can see what was advised
 and whether it was followed.
 
-**2. Claude Code's native [advisor](https://code.claude.com/docs/en/advisor) —
-recommended, complementary.** Set
+**Claude Code's native [advisor](https://code.claude.com/docs/en/advisor) — the
+better mechanism when you have it.** Set
 
 ```json
 { "advisorModel": "opus" }
@@ -102,18 +112,14 @@ recommended, complementary.** Set
 
 (or `/advisor opus`, or `claude --advisor opus`) and **subagents inherit it**,
 so every sonnet agent runs the canonical *Sonnet main + Opus advisor* pairing.
-It sees the full conversation and costs no context handoff, but Claude decides
-when to call it — which is exactly why it does not replace layer 1: it cannot
-guarantee a consult happens. Use both; they cover different failure modes.
+It sees the full conversation, so it costs no context handoff and needs no
+summarising by the caller. Its one limitation is that Claude decides when to
+call it — there is no way to force a consult — which is why the framework ships
+`gismo:advisor` for setups that don't have it.
 
 Note the pairing rule cuts the other way for the opus agents: an Opus 4.7+ main
 accepts only another Opus 4.7+ (or Fable) as advisor, so `spec-writer` and
 `task-reviewer` gain nothing from `advisorModel: sonnet`.
-
-Running both layers means some overlap. If that proves wasteful for your
-workload, drop the mandatory pre-report consult to optional in
-`skills/implement/TASK_CONTRACT.md` — the approach consult is the one that
-saves whole repair rounds.
 
 ### Overriding the model tiers
 

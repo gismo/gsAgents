@@ -20,7 +20,12 @@ done
 
 BUILD_DIR="${1:-}"
 JOBS="${2:-4}"
-[ -n "$BUILD_DIR" ] || { echo "usage: set_config.sh <build_dir> [jobs]" >&2; echo "STATUS: FAIL"; exit 2; }
+ADVISOR="${3:-agent}"
+[ -n "$BUILD_DIR" ] || { echo "usage: set_config.sh <build_dir> [jobs] [advisor: agent|native]" >&2; echo "STATUS: FAIL"; exit 2; }
+case "$ADVISOR" in
+    agent|native) ;;
+    *) echo "set_config: advisor must be 'agent' or 'native' (got '$ADVISOR')" >&2; echo "STATUS: FAIL"; exit 2 ;;
+esac
 
 case "$BUILD_DIR" in
     /*) ABS="$BUILD_DIR" ;;
@@ -44,7 +49,7 @@ if [ ! -f "$ABS/compile_commands.json" ]; then
 fi
 
 mkdir -p "$GISMO_ROOT/.claude"
-printf '{\n  "build_dir": "%s",\n  "jobs": %s\n}\n' "$ABS" "$JOBS" > "$GISMO_ROOT/.claude/gismo-dev.local.json"
+printf '{\n  "build_dir": "%s",\n  "jobs": %s,\n  "advisor": "%s"\n}\n' "$ABS" "$JOBS" "$ADVISOR" > "$GISMO_ROOT/.claude/gismo-dev.local.json"
 
 echo "Wrote $GISMO_ROOT/.claude/gismo-dev.local.json:"
 cat "$GISMO_ROOT/.claude/gismo-dev.local.json"

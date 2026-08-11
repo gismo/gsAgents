@@ -109,8 +109,16 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    multi-step exploration. Never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
-   **Consult `gismo:advisor` (opus) — mandatory, and independent of whether a
-   native advisor is attached to your session.** Two points:
+   **Advice comes from exactly one source, chosen by config — never two.**
+   `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` prints
+   `GISMO_ADVISOR` (you already run this via the build scripts):
+   - `GISMO_ADVISOR=native` — Claude Code's own advisor is configured and
+     subagents inherit it, so it is already advising you. **Do not consult
+     `gismo:advisor`**; note `Advisor: native` in your report and move on.
+   - `GISMO_ADVISOR=agent` (the default) — no native advisor is configured.
+     Consult `gismo:advisor` (opus) at the two points below; it is mandatory.
+
+   Two points:
    a. Whenever you are about to commit to a numerical or API approach the spec
       left open — before you write the code, not after.
    b. Once before writing your report, as a completion check.

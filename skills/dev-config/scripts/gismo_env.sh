@@ -36,10 +36,11 @@ gismo_env() {
 
     # --- config file ---
     local cfg="$GISMO_ROOT/.claude/gismo-dev.local.json"
-    local cfg_build="" cfg_jobs=""
+    local cfg_build="" cfg_jobs="" cfg_advisor=""
     if [ -f "$cfg" ]; then
         cfg_build="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('build_dir',''))" "$cfg" 2>/dev/null)"
         cfg_jobs="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('jobs',''))" "$cfg" 2>/dev/null)"
+        cfg_advisor="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('advisor',''))" "$cfg" 2>/dev/null)"
     fi
 
     # --- build dir ---
@@ -78,6 +79,16 @@ gismo_env() {
     [ "$GISMO_JOBS" -gt "$cap" ] && GISMO_JOBS="$cap"
     [ "$GISMO_JOBS" -lt 1 ] && GISMO_JOBS=1
     export GISMO_JOBS
+
+    # --- advisor mode: who advises the sonnet implementers ---
+    #   agent  (default) -> implementers consult the gismo:advisor subagent
+    #   native           -> Claude Code's own advisor is configured (advisorModel);
+    #                       implementers skip gismo:advisor so advice is not doubled
+    if [ -z "${GISMO_ADVISOR:-}" ]; then
+        GISMO_ADVISOR="${cfg_advisor:-agent}"
+    fi
+    case "$GISMO_ADVISOR" in agent|native) ;; *) GISMO_ADVISOR=agent ;; esac
+    export GISMO_ADVISOR
     return 0
 }
 
@@ -88,6 +99,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     echo "GISMO_ROOT=$GISMO_ROOT"
     echo "GISMO_BUILD_DIR=$GISMO_BUILD_DIR"
     echo "GISMO_JOBS=$GISMO_JOBS"
+    echo "GISMO_ADVISOR=$GISMO_ADVISOR"
     grep -m1 '^CMAKE_BUILD_TYPE:' "$GISMO_BUILD_DIR/CMakeCache.txt" 2>/dev/null || true
     echo "STATUS: OK"
 fi
