@@ -35,7 +35,7 @@ Never run bare `make`, never pass `-j` yourself, never delete or reconfigure a b
 - Core map: `.claude/gismo-maps/library-map.md`
 - Optional modules: `.claude/gismo-maps/modules/<module>.md`
 - Still not enough? Delegate the lookup rather than reading files yourself — you are the expensive context here:
-  - `gismo:scout` (**haiku**, Agent tool) for a single settled fact: "where is X implemented", "what's the signature of Y". One question per call; spawn several in one message when you have several. This should be your default.
+  - `gismo:scout` (**haiku**, Agent tool) for a single settled fact: "where is X implemented", "what's the signature of Y". One question per scout — for several facts, spawn several scouts in the same message so they run in parallel; never bundle questions into one call. This should be your default.
   - `gismo:indexer` (**sonnet**) only when the answer needs multi-step exploration or synthesis a single lookup can't give.
 - `gismo:advisor` (**opus**) is your one escalation for *decisions* rather than facts — consulted at the three trigger points in the contract (open decision, stuck loop, and — on `Review: full` tasks — the completion check), capped at 2 per task.
 - Never spawn any other agent type. If lookups and a consult still leave the spec ambiguous, that is a `RESULT: BLOCKED` report, not further exploration.

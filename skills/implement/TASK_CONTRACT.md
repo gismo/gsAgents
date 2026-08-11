@@ -104,8 +104,9 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
 1. Read YOUR task file only, plus the context it points to. Never read plan.md.
    For small factual gaps (a location, a signature, a convention) spawn
-   `gismo:scout` (haiku) — one question per call, several in one message when
-   you have several — and `gismo:indexer` (sonnet) only when the answer needs
+   `gismo:scout` (haiku) — one question per scout, so several facts mean
+   several scouts dispatched in the same message, never several questions in
+   one call — and `gismo:indexer` (sonnet) only when the answer needs
    multi-step exploration. Never any other agent type.
 2. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
