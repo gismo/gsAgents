@@ -116,15 +116,24 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
      subagents inherit it, so it is already advising you. **Do not consult
      `gismo:advisor`**; note `Advisor: native` in your report and move on.
    - `GISMO_ADVISOR=agent` (the default) — no native advisor is configured.
-     Consult `gismo:advisor` (opus) at the two points below; it is mandatory.
+     Consult `gismo:advisor` (opus) at the trigger points below.
 
-   Two points:
-   a. Whenever you are about to commit to a numerical or API approach the spec
-      left open — before you write the code, not after.
-   b. Once before writing your report, as a completion check.
+   Three trigger points — the first two fire on need, the third on risk:
+   a. **Open decision.** Whenever you are about to commit to a numerical or API
+      approach the spec left open — before you write the code, not after.
+   b. **Stuck loop.** After two failed build or test cycles against the *same*
+      error, consult before attempting a third. A third identical attempt is
+      rarely the one that works, and this is the cheapest moment to be told you
+      are attacking the wrong layer.
+   c. **Completion check**, before writing your report: **mandatory on
+      `Review: full` tasks**, optional on `light`/`none` — those carry little
+      enough risk that the deferred batch review is proportionate, and an opus
+      consult to bless a trivial change is not.
    Pass the task-file path, the decision, and the options you are weighing; it
    reads the spec and your diff itself. At most **2 consults per task** — it is
-   the most expensive agent you can reach.
+   the most expensive agent you can reach, so if several triggers fire, spend
+   them on the earliest ones: advice before the code is written is worth more
+   than advice after.
    Act on its verdict line: `ADVICE: PROCEED` → follow the recommendation;
    `ADVICE: SPEC DECIDES` → you misread the spec, follow the spec;
    `ADVICE: BLOCKED` → report `RESULT: BLOCKED` relaying its reasoning. Record

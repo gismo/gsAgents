@@ -16,6 +16,7 @@ Your invocation names the task file (`.claude/plans/<slug>/tasks/NN-<name>.md`),
 
 1. **Get your own context — do not rely on the caller's summary.** The caller is the cheaper model and may have framed the question badly, or misread the spec. Read the task file in full, its `NN-report.md` if one exists yet, and the actual work so far with `git diff -- <files listed in the task>`. Read the specific source the decision touches. The framework writes its state to disk precisely so you can do this.
 2. **Answer the decision that matters, not just the one asked.** If the caller is choosing between two approaches and both are wrong, say so. If the real problem is upstream of the question, name it.
+   - **When the caller is stuck in a failing loop** (two failed build or test cycles on the same error), do not hand it a third variation of the same fix. Read the actual error and the diff, and say which layer the problem is really in — a wrong assumption in the spec, a missing instantiation, a convention it has violated, the wrong build target. Naming the layer is the whole value of the consult.
 3. Ground the advice in this codebase: existing G+Smo classes and utilities to build on (with paths), the convention the surrounding code follows, the numerical hazard the caller has not noticed. Advice that would apply to any C++ project is not worth an opus call.
 
 ## Return format

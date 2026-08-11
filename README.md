@@ -84,9 +84,20 @@ Set it to `native` if you run with `advisorModel`, and the implementers skip
 `gismo:advisor` entirely — you are advised once, by the better mechanism. Run
 `/gismo:dev-config` again after `/advisor off` to switch back.
 
-**`gismo:advisor` (opus) — the shipped fallback.** Consulted at two points:
-before committing to a numerical or API approach the spec left open, and once
-before writing the report. Capped at 2 consults per task. Unlike a reviewer it
+**`gismo:advisor` (opus) — the shipped fallback.** Three trigger points, capped
+at 2 consults per task — the first two fire on need, the third on risk:
+
+| Trigger | When |
+|---|---|
+| Open decision | About to commit to a numerical or API approach the spec left open — before the code is written |
+| Stuck loop | Two failed build/test cycles on the same error, before a third attempt |
+| Completion check | Before writing the report — mandatory on `Review: full`, optional on `light`/`none` |
+
+The middle trigger mirrors a heuristic Claude's native advisor uses, and it is
+where a cheaper model gains most: told which *layer* the problem is in rather
+than handed a third variation of the same fix. The third is risk-scaled for the
+same reason `Review:` is — a trivial change should not buy an opus opinion to
+bless it. Unlike a reviewer it
 is consultative, not binding, and it runs *during* the work so a defect is
 fixed before the report rather than bouncing back through a repair round. It
 reads the task spec and the working diff itself instead of trusting the
