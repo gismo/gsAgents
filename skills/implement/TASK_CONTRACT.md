@@ -59,6 +59,21 @@ decomposition time:
   `gismo:task-lead` (giving the review-file path as context in the prompt) —
   never another deferred pass.
 
+## Dispatch rule: the tier is not yours to choose
+
+Binding on every agent in this framework that spawns another, orchestrator
+included. **Never pass a `model` argument to the Agent tool, and never write a
+model, tier or cost instruction into a dispatch prompt.** Each agent's tier is
+declared in its own definition — scout is haiku, the implementers are sonnet,
+spec-writer, reviewer and advisor are opus — and a `model` argument silently
+overrides that declaration. The whole cost model of this framework is the tier
+split; an agent that re-decides it at dispatch time dismantles the design while
+appearing to follow it, and nothing in the agent files will show what happened.
+
+If a task genuinely needs a stronger model than its agent declares, that is not
+a dispatch-time tweak: the implementers escalate one decision to `gismo:advisor`
+(opus), and everything else is the orchestrator's call to make in the spec.
+
 ## Spec-writer protocol (gismo:spec-writer)
 
 The orchestrator decomposes; one spec-writer per task writes the file.

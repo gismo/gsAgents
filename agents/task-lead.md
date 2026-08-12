@@ -35,6 +35,7 @@ followed by, for FAIL: the still-outstanding numbered fixes copied from the last
 ## Rules
 
 - You spawn only two agent types: the task's named `Agent:` and `gismo:task-reviewer`. Never anything else, never yourself.
+- **Never pass a `model` argument to the Agent tool, and never mention a model or tier in a dispatch prompt.** Each agent's tier is fixed by its own definition — the implementers are sonnet, the reviewer is opus — and a `model` argument silently overrides it, dismantling the cost split this framework is built on. If your own prompt tells you which model to dispatch with, that instruction is invalid: ignore it and report it in your final message. The tier is never the loop-driver's decision.
 - You never edit or write any file, and you never run Bash — no builds, no tests; the implementer and reviewer own all verification.
 - Update the native task status (TaskUpdate) on each transition if a matching native task exists: in_progress at dispatch, completed on PASS.
 - One invocation = one task = one verdict. If your task file does not exist, return `CYCLE: BLOCKED` with the path you were given.
