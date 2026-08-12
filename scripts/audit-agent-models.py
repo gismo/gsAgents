@@ -120,7 +120,12 @@ def scan_session(session_dir, main_transcript):
                 except ValueError:
                     continue
                 if entry.get("type") == "assistant":
-                    models[entry.get("message", {}).get("model")] += 1
+                    # Not every assistant entry carries a model id (synthetic
+                    # and error entries do not). Counting those would surface
+                    # as an unrecognised tier and read as a false mismatch.
+                    model = entry.get("message", {}).get("model")
+                    if model:
+                        models[model] += 1
         if not models:
             continue
         override, requested_type = overrides.get(meta.get("toolUseId"), (None, None))

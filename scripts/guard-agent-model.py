@@ -6,24 +6,18 @@ file's frontmatter, so a dispatcher can silently promote the haiku scout to opus
 and nothing in the agent definition would show it. This denies such calls at the
 point of dispatch, with a reason the caller sees.
 
-Wire it in settings.json:
-
-    "hooks": {
-      "PreToolUse": [
-        { "matcher": "Agent",
-          "hooks": [{ "type": "command",
-                      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-agent-model.py" }] }
-      ]
-    }
-
-Calls to non-gismo agents, and calls that pass no model, are left to the normal
-permission flow.
+The plugin wires this itself in `hooks/hooks.json`, so it is active on install
+with no configuration. Calls to agents outside this plugin, calls that pass no
+model, and calls whose model is on the tier the agent already declares are all
+left to the normal permission flow.
 """
 
 import json
 import re
 import sys
 from pathlib import Path
+
+TIER = re.compile(r"haiku|sonnet|opus|fable")
 
 
 def declared_tiers(agents_dir):
@@ -64,7 +58,14 @@ def main():
     bare = subagent.split(":")[-1]
     declared = declared_tiers(Path(__file__).resolve().parent.parent / "agents")
     want = declared.get(bare)
-    if not want or want == override:
+    if not want:
+        return 0
+
+    # Frontmatter names a tier ("haiku"); a caller may pass either a tier or a
+    # concrete id ("claude-haiku-4-5-20251001"). Same tier either way is not an
+    # override. An unrecognised string is denied — a model this guard cannot
+    # place against a tier is exactly the case worth stopping.
+    if TIER.search(override) and TIER.search(override).group(0) == want:
         return 0
 
     json.dump(
