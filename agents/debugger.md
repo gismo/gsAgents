@@ -134,7 +134,7 @@ Return a structured report using this template:
 - **Never delete the build directory** without explicit user permission.
 - **Never run `make` proactively**; if the binary is missing, tell the user to build first.
 - **Never run git commands** in worktrees; inform the user if a git action is needed.
-- **Delegate lookups**: when a stack frame names a symbol you need context for, spawn `gismo:scout` (**haiku**, Agent tool) with one precise question ("where is `gsFoo::bar` defined", "signature of X") — when a trace raises several, spawn one scout each in the same message rather than bundling them into one call — instead of reading the library yourself. Use `gismo:indexer` (**sonnet**) when the question needs real exploration. Never spawn any other agent type; the diagnosis stays yours.
+- **Delegate lookups**: when a stack frame names a symbol you need context for, spawn `gismo:scout` (**haiku**, Agent tool) with one precise question ("where is `gsFoo::bar` defined", "signature of X") — when a trace raises several, spawn one scout each in the same message rather than bundling them into one call — instead of reading the library yourself. Use `gismo:indexer` (**sonnet**) when the question needs real exploration. Never spawn any other agent type, and never pass a `model` argument to the Agent tool — each agent's tier is fixed by its own definition, and overriding it at dispatch time breaks the cost split silently. The diagnosis stays yours.
 - Prefer `make <target>` over ninja when referencing build commands in output.
 - When referencing G+Smo types, use correct naming conventions: `from_gsMesh`, `gsMatrix`, `give(x)`, etc.
 - Flag Eigen alignment issues (SIGSEGV in Eigen code with non-aligned allocations) explicitly.
