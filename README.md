@@ -54,6 +54,36 @@ the implementers, the reviewer, doc-writer and debugger may spawn scout and
 indexer; the three implementers may additionally spawn `gismo:advisor` (opus,
 capped at 2 per task); scout, indexer and advisor spawn nothing.
 
+### Verifying the tiers actually held
+
+The `model:` line in an agent file states an intention, not an outcome: an
+explicit `model` argument on the `Agent` call overrides the frontmatter, and a
+`subagent_type` that fails to resolve falls back to a generic agent running at
+the caller's tier. Neither is visible in the agent definition, so the tiering —
+and the cost model that rests on it — has to be checked against the transcripts,
+which record the resolved model on every message.
+
+```
+scripts/audit-agent-models.py            # every session for this project
+scripts/audit-agent-models.py --quiet    # mismatches only; exit 1 if any
+```
+
+Each run is reported as `declared=<tier> ran=<tier>`, and a mismatch names the
+cause — whether the dispatching call passed a `model` argument or the harness
+resolved something else. To stop the first case before it costs anything, wire
+the guard into `settings.json`; it denies an `Agent` call that overrides a gismo
+agent's declared tier:
+
+```json
+"hooks": {
+  "PreToolUse": [
+    { "matcher": "Agent",
+      "hooks": [{ "type": "command",
+                  "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-agent-model.py" }] }
+  ]
+}
+```
+
 The ceremony also scales with risk: each task spec carries a `Review:` level,
 fixed by the orchestrator at decomposition time. `full` tasks get the
 in-cycle adversarial review; `light`/`none` tasks defer their review into
