@@ -12,6 +12,10 @@ output/
 .DS_Store
 Thumbs.db
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Virtual environments
 venv/
 env/

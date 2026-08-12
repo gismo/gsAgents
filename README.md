@@ -70,19 +70,17 @@ scripts/audit-agent-models.py --quiet    # mismatches only; exit 1 if any
 
 Each run is reported as `declared=<tier> ran=<tier>`, and a mismatch names the
 cause — whether the dispatching call passed a `model` argument or the harness
-resolved something else. To stop the first case before it costs anything, wire
-the guard into `settings.json`; it denies an `Agent` call that overrides a gismo
-agent's declared tier:
+resolved something else.
 
-```json
-"hooks": {
-  "PreToolUse": [
-    { "matcher": "Agent",
-      "hooks": [{ "type": "command",
-                  "command": "${CLAUDE_PLUGIN_ROOT}/scripts/guard-agent-model.py" }] }
-  ]
-}
-```
+The first case is caught before it costs anything: the plugin ships a
+`PreToolUse` hook (`hooks/hooks.json` → `scripts/guard-agent-model.py`) that
+denies any `Agent` call passing a `model` that contradicts the target agent's
+frontmatter, with a reason the caller sees. It needs no configuration and does
+nothing to calls that pass no model, or that target an agent outside this
+plugin. The prose rule it enforces is in `TASK_CONTRACT.md`; the hook exists
+because that rule has been broken in practice — an orchestrator once appended
+"use opus for the implementer and reviewer sub-dispatches" to a task-lead
+prompt, silently reverting the sonnet/opus split for a whole run.
 
 The ceremony also scales with risk: each task spec carries a `Review:` level,
 fixed by the orchestrator at decomposition time. `full` tasks get the
