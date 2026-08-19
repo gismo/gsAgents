@@ -6,7 +6,7 @@ This file contains universal instructions for all AI agents working in this repo
 
 1. **Write clean, maintainable code**
 2. **Follow existing conventions** in the codebase
-3. **Document your changes** with clear comments
+3. **Document the code, not the change** — comments explain what is there for the next reader; the reasoning behind a diff goes in the report, the commit message or the PR
 4. **Test your code** before submitting
 
 ## Workflow

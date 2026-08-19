@@ -39,6 +39,43 @@ before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
 reports and reviews stay out of the main session's context; the files under
 `.claude/plans/<slug>/tasks/` remain the audit trail.
 
+### Two gears: quick and standard
+
+A one-line request should not pay for a twelve-task orchestration. `/gismo:plan`
+triages every request against a checkable rubric — at most 2 tasks, no new public API,
+no numerical algorithm change, nothing later builds on it, ≲ 5 files — and records the
+verdict as a `Mode:` line in `plan.md` (`--quick` / `--full` overrides it).
+
+- **quick** — the orchestrator writes the task file itself when the plan is already
+  grounded, dispatches the implementer directly, runs one `gismo:task-reviewer` and at
+  most one repair round. No spec-writer wave, no task-lead, no batch review, no
+  `summary.md`.
+- **standard** — the full machinery below.
+
+`Review: full|light|none` still scales the *review* within a run; `Mode:` scales the
+*machinery around it*. They are independent dials.
+
+### Grounding once instead of N times
+
+In standard mode the spec-writers run concurrently, and left to themselves they
+re-scout the same facts — the class everyone extends, the pattern everyone imitates.
+So the orchestrator runs a **grounding pre-pass**: one batch of haiku scouts for the
+facts more than one task needs, written to `.claude/plans/<slug>/context.md` with
+`file:line` citations. Spec-writers read the ledger, scout only what is specific to
+their own task, and return `New facts:` in their report. They are dispatched in **waves
+of ~4**; between waves the orchestrator — the ledger's single writer, so no append race —
+folds the new facts in, and the next wave starts warmer.
+
+### Comments that survive the commit
+
+Agents narrate their diffs in comments: "removed the old loop because…", "added for
+task 3". That is useful scaffolding while implementing and noise once it lands. The
+framework handles it twice over. **Prevention**: the implementer protocol puts change
+reasoning in `NN-report.md`, where it already belongs, and the reviewer flags
+scaffolding left in the source. **Safety net**: `/gismo:tidy` runs over the run's diff
+before the final conformance check (or standalone on any dirty tree), stripping diff
+narration while keeping doxygen, theory links, complexity notes and real TODOs.
+
 Cost control rests on an asymmetry: **writing is cheap, checking is expensive.**
 A well-grounded spec (opus `gismo:spec-writer`) lets the three implementers run
 on sonnet, while the adversarial gate that has to catch what they missed stays
@@ -192,8 +229,9 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 
 | Skill | Purpose |
 |---|---|
-| `/gismo:plan` | Planning conventions → `plan.md` + task files |
-| `/gismo:implement` | Closed-loop orchestration of an approved plan |
+| `/gismo:plan` | Triage (quick/standard) + planning conventions → `plan.md` (+ decomposition) |
+| `/gismo:implement` | Closed-loop orchestration of an approved plan, in either mode |
+| `/gismo:tidy` | Strip change-narration comments from the diff before committing |
 | `/gismo:dev-config` | Set build dir + parallel-jobs cap |
 | `/gismo:build-target` | Guarded `make <target>` — the only sanctioned build |
 | `/gismo:syntax-check` | Per-file `-fsyntax-only` gate via `compile_commands.json` |

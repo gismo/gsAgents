@@ -25,6 +25,7 @@ Your invocation names one task file (`.claude/plans/<slug>/tasks/NN-<name>.md`).
 - Errors via `GISMO_ASSERT` (debug-only) / `GISMO_ENSURE` / `GISMO_ERROR`; no exceptions in hot loops.
 - Performance-critical code: prefer Eigen block operations over element loops; state algorithmic complexity in a comment when it is not obvious.
 - Match the style of the surrounding file (comment density, naming, spacing).
+- Comments explain the code, never the change: no diff narration, no task scaffolding, no commented-out code you replaced — the reasoning goes in `NN-report.md`. Doxygen, theory and complexity notes always stay. Full rules: **Comment discipline** in the contract.
 
 ## Build safety (absolute)
 
