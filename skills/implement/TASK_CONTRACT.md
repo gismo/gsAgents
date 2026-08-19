@@ -5,6 +5,7 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 ```
 .claude/plans/<slug>/
 ├── plan.md            # the approved plan (context, approach, file inventory, verification)
+├── context.md         # shared fact ledger — facts several tasks need (standard mode)
 ├── tasks/
 │   ├── 01-<name>.md   # task spec (orchestrator decomposes, gismo:spec-writer writes)
 │   ├── 01-report.md   # implementation report (written by the implementer agent)
@@ -12,6 +13,19 @@ Every feature run lives in `.claude/plans/<slug>/` (gitignored):
 │   └── ...
 └── summary.md         # final plan-conformance summary (written by the orchestrator)
 ```
+
+The run has a **mode**, set by the plan's `Mode:` line (rubric in
+`${CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` §0):
+
+- **standard** — the full machinery: one `gismo:spec-writer` per task, one
+  `gismo:task-lead` per task, deferred batch review, `summary.md`.
+- **quick** (≤ 2 tasks, no new public API, no numerics, nothing builds on it) —
+  the orchestrator writes the task file itself when the plan is already
+  grounded (a spec-writer only when it is not), dispatches the agent directly,
+  runs one `gismo:task-reviewer` and one repair round at most. No task-lead, no
+  batch review, no `summary.md`. Every other rule in this contract — the file
+  formats, the implementer protocol, the dispatch rule, build safety — applies
+  unchanged.
 
 ## Task spec format (`NN-<name>.md`)
 
@@ -82,14 +96,25 @@ target, test command, dependencies, allowed files) and the plan directory.
 
 1. Read `plan.md` for intent — spec-writers are on the orchestration side and
    may read it; implementers may not.
-2. Ground every pointer in the real tree: exact paths, signatures, the
+2. **Read `context.md` first** (when the dispatch names it): the orchestrator
+   has already looked up the facts several tasks share, each with a `file:line`
+   citation. A fact that is in the ledger is settled — use it, never re-scout
+   it. Sibling spec-writers run concurrently, so anything you look up that the
+   ledger lacks is very likely being looked up next to you; keep your own
+   lookups to what is specific to *your* task.
+3. Ground every remaining pointer in the real tree: exact paths, signatures, the
    `file.hpp:120` location of the pattern to imitate, the relevant module map.
    Delegate the lookups — `gismo:scout` (haiku) per fact, `gismo:indexer`
-   (sonnet) when exploration is needed; no other agent type.
-3. Never invent a pointer. A plan reference that does not exist in the tree is
+   (sonnet) when exploration is needed; no other agent type. Return the
+   generally-useful facts you found in a `New facts:` list (below); the
+   orchestrator folds them into the ledger for the next wave. Never write to
+   `context.md` yourself — it has exactly one writer, and concurrent appends
+   would race.
+4. Never invent a pointer. A plan reference that does not exist in the tree is
    a **grounding gap**, reported to the orchestrator — not guessed around.
-4. Write `NN-<name>.md` in the format above and return
-   `SPEC: WRITTEN | BLOCKED` plus a `Gaps:` list.
+5. Write `NN-<name>.md` in the format above and return
+   `SPEC: WRITTEN | BLOCKED` plus a `Gaps:` list and a `New facts:` list
+   (facts worth sharing, with `file:line`; `none` if there are none).
 
 The spec-writer has no Bash tool: it never builds, runs, or configures.
 
@@ -159,7 +184,8 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
    c. the task's test command
-4. Write `NN-report.md`: files changed, what was done, verification evidence
+4. Write `NN-report.md` — **this is where the reasoning goes, not the source**
+   (see comment discipline below): files changed, what was done, verification evidence
    (the STATUS lines + relevant output tails), and any deviation from the spec
    with its reason. Every claim must be auditable against a tool result from
    this run — only report work you can point to evidence for; if something is
@@ -169,6 +195,43 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    turn on a question, a plan, or a promise ("I'll now build...") — end only
    after the report file is written (`RESULT: BLOCKED` is a report, not a
    question).
+
+## Comment discipline (all implementer agents)
+
+**The report is the place for reasoning about the change; the source is the
+place for reasoning about the code.** You have `NN-report.md` precisely so you
+do not have to narrate your work in comments — and the report survives review
+while a comment survives forever, in a file whose next reader never saw your
+diff.
+
+Never write into the source:
+
+- narration of the change — "removed the old loop", "previously this used
+  `gsFoo`", "replaced by the helper below", a paragraph explaining a deletion;
+- task or process scaffolding — "added for task 3", "per the spec", "addresses
+  review point 2", run identifiers, `TODO(review)`;
+- restatements of what the code plainly says, or first-person hedging ("this
+  should work", "I chose this because");
+- commented-out code you replaced. It is in git.
+
+Do write, as always:
+
+- doxygen on anything public;
+- the theory: the equation, the scheme, the reference being implemented;
+- complexity notes, and *why* a non-obvious formulation is the correct one when
+  the obvious one is not (stability, cancellation, aliasing, index conventions,
+  units, tensor shapes);
+- real `TODO`/`FIXME` naming real remaining work, and warnings about real traps.
+
+The test before you type a comment: **would this still be true and useful to
+someone reading the file who never saw this diff?** If it only makes sense as a
+message to a reviewer, it belongs in the report. If you need scaffolding notes
+to keep track while you work, that is fine — delete them before you write the
+report; a run-level `/gismo:tidy` pass exists as a safety net, not as your
+excuse.
+
+Match the surrounding file's comment density either way. G+Smo source is not
+uncommented, and stripping the theory out of a solver is the opposite failure.
 
 ## Reviewer protocol (gismo:task-reviewer)
 
@@ -191,7 +254,10 @@ each, plus cross-task consistency notes). Both follow:
    and a `Notes:` section for non-blocking findings — report everything found,
    at every severity; only blocking findings decide the verdict.
    Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
-   G+Smo conventions, no out-of-scope files touched, no scope creep, and — on
+   G+Smo conventions, comment discipline (change-narration or process
+   scaffolding left in the source is a `Notes:` finding — blocking only if it
+   is so thick it obscures the code), no out-of-scope files touched, no scope
+   creep, and — on
    test tasks — falsification evidence (each new test observed to FAIL once,
    per the test-writer's protocol) present in the report. The report should
    also carry the `gismo:advisor` verdict lines; advice that was solicited and
