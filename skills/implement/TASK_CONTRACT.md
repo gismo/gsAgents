@@ -53,6 +53,12 @@ What must exist / behave differently when this task is done.
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
 
+A multi-item `## Acceptance criteria` list doubles as the implementer's own
+in-task todo list — it mirrors each checkbox into a native sub-task and
+checks them off as it goes (implementer protocol, step 3 below). Write real,
+independently checkable items, not one criterion artificially split into
+several.
+
 The `Review:` level is the orchestrator's cost/robustness dial, fixed at
 decomposition time:
 
@@ -120,35 +126,58 @@ The spec-writer has no Bash tool: it never builds, runs, or configures.
 
 ## Task-lead protocol (gismo:task-lead)
 
-One task-lead per task, dispatched by the orchestrator with the task-file path.
+One task-lead per task, dispatched by the orchestrator with the task-file path
+and, when the orchestrator mirrored the task into the run's native todo list,
+that task's native task ID.
 It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
 1. Read the task file's `Agent:` and `Review:` lines — nothing else. No
    plan.md, no source, no context files: the implementer reads them itself.
-2. Dispatch that agent with the task-file path; on its return, dispatch
-   `gismo:task-reviewer` with the same path — `Review: full` only. On
+2. Dispatch that agent with the task-file path, plus the native task ID if you
+   were given one — the implementer updates it directly, so forward it
+   verbatim rather than searching for a match yourself; on its return,
+   dispatch `gismo:task-reviewer` with the same path — `Review: full` only. On
    `light`/`none`, skip the reviewer (the orchestrator batch-reviews these
    at the end): a `RESULT: DONE` report with a non-empty evidence section
-   is `CYCLE: PASS (review deferred)`; an empty or missing evidence section
-   earns one repair re-dispatch ("complete the evidence section"), after
-   which a still-evidence-less report is `CYCLE: FAIL`.
-3. `VERDICT: FAIL` → re-dispatch the implementer with task-file + review-file
-   paths, then re-review. Maximum **2 repair rounds**, then stop.
+   is `CYCLE: PASS (review deferred)` at round 0; an empty or missing evidence
+   section earns one repair round ("complete the evidence section") by either
+   route in 3, after which a still-evidence-less report is `CYCLE: FAIL`.
+3. `VERDICT: FAIL` → put the implementer back on the task with task-file +
+   review-file paths — `SendMessage` to the agent it already spawned, whose
+   context is warm (it already has the native task ID from round 0, no need
+   to repeat it), or a fresh dispatch when that agent is gone (repeat the
+   native task ID, same as round 0) — then re-review. Maximum **2 repair
+   rounds**, then stop. A nudge to a still-running agent is not a repair
+   round; a message carrying review fixes is.
 4. `RESULT: BLOCKED` or a reviewer-confirmed spec defect ends the cycle at
    once — repair rounds cannot fix a broken spec.
 5. Return `CYCLE: PASS | FAIL | BLOCKED` plus rounds used, the outstanding
-   fixes (FAIL) or the blocker (BLOCKED). The task-lead edits no files and
-   runs no builds; spec repair and escalation belong to the orchestrator.
+   fixes (FAIL) or the blocker (BLOCKED). The task-lead edits no files and its
+   Bash is read-only inspection (`git diff`, reading a report) — never a build
+   or a test run; spec repair and escalation belong to the orchestrator. Its
+   `SendMessage` reaches only the two agents that cycle spawned itself, never
+   the orchestrator or a sibling lead.
 
 ## Implementer protocol (all implementer agents)
 
-1. Read YOUR task file only, plus the context it points to. Never read plan.md.
+1. If your dispatch included a native task ID, mark it `in_progress`
+   (`TaskUpdate`) before doing anything else — you own that transition now,
+   not your dispatcher. No ID means no matching native task; skip this
+   silently rather than searching for one.
+2. Read YOUR task file only, plus the context it points to. Never read plan.md.
    For small factual gaps (a location, a signature, a convention) spawn
    `gismo:scout` (haiku) — one question per scout, so several facts mean
    several scouts dispatched in the same message, never several questions in
    one call — and `gismo:indexer` (sonnet) only when the answer needs
    multi-step exploration. Never any other agent type.
-2. Implement within the listed files. If the spec turns out to be impossible or
+3. If `## Acceptance criteria` lists more than one checkable item, mirror each
+   into its own native sub-task (`TaskCreate`) before you start implementing,
+   and mark each `completed` (`TaskUpdate`) the moment you've actually
+   satisfied it — a progress trail through *this* task, independent of the
+   single outer ID from step 1 (if you were given one). A criteria list of
+   one item, or none, doesn't warrant it — skip silently rather than
+   inventing a breakdown the spec doesn't have.
+4. Implement within the listed files. If the spec turns out to be impossible or
    wrong, STOP and write the blocker into your report — do not improvise scope.
    **Advice comes from exactly one source, chosen by config — never two.**
    `bash ${CLAUDE_PLUGIN_ROOT}/skills/dev-config/scripts/gismo_env.sh` prints
@@ -180,18 +209,24 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    `ADVICE: BLOCKED` → report `RESULT: BLOCKED` relaying its reasoning. Record
    every consult's verdict line in your report so the reviewer can see what was
    advised. Never settle an open judgment call by guessing.
-3. Verify, in order:
+5. Verify, in order:
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
    c. the task's test command
-4. Write `NN-report.md` — **this is where the reasoning goes, not the source**
+6. Write `NN-report.md` — **this is where the reasoning goes, not the source**
    (see comment discipline below): files changed, what was done, verification evidence
    (the STATUS lines + relevant output tails), and any deviation from the spec
    with its reason. Every claim must be auditable against a tool result from
    this run — only report work you can point to evidence for; if something is
-   unverified or failing, say so plainly instead of hedging. End the file with
-   `RESULT: DONE` or `RESULT: BLOCKED`.
-5. You operate autonomously: nobody answers questions mid-task. Never end your
+   unverified or failing, say so plainly instead of hedging. Every
+   acceptance-criterion sub-task from step 3 should be `completed` by now — one
+   still open means that criterion isn't actually met, so don't write
+   `RESULT: DONE` against it. End the file with `RESULT: DONE` or
+   `RESULT: BLOCKED`. If you have an outer native task ID (step 1), mark it
+   `completed` on `RESULT: DONE`; leave it `in_progress` on `RESULT: BLOCKED`
+   — the task isn't finished, and the orchestrator's repair path re-dispatches
+   against the same ID.
+7. You operate autonomously: nobody answers questions mid-task. Never end your
    turn on a question, a plan, or a promise ("I'll now build...") — end only
    after the report file is written (`RESULT: BLOCKED` is a report, not a
    question).

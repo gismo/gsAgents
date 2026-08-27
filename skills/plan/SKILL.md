@@ -1,11 +1,32 @@
 ---
 name: plan
 description: G+Smo planning conventions — triage the request into quick or standard mode, then write a plan.md (and, in standard mode, a decomposition) that implementer agents can execute without discovery. Use at the end of plan mode for any G+Smo change, before invoking /gismo:implement.
-allowed-tools: Read, Write, Grep, Glob
+allowed-tools: Read, Write, Grep, Glob, TaskCreate, TaskGet, TaskList, TaskUpdate
 argument-hint: "[--quick|--full]"
 ---
 
 You are preparing a G+Smo feature plan for execution by the closed-loop framework (`/gismo:implement`). The full artifact formats are in `${CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read that file now; this skill only adds the planning guidance.
+
+## Standing rules
+
+**Keep a todo list.** Track the planning session's own steps in the native task
+list (`TaskCreate` / `TaskUpdate`): the triage verdict, the grounding lookups
+still open, each section of `plan.md`, the decomposition. A plan is written
+front to back but researched out of order, and the list is what keeps a
+half-grounded file inventory from being handed to `/gismo:implement` as if it
+were finished.
+
+**Ask early, and ask more than feels necessary.** Planning is the cheapest place
+in this framework to resolve anything: a question here costs one exchange, while
+the same uncertainty left in the plan becomes a spec line, then a task cycle,
+then a repair round — and the agents that execute the plan cannot ask anyone,
+they work autonomously against whatever you wrote. So when the request does not
+already settle it — scope, which existing class to build on, a tolerance, an
+interface, how far a refactor should reach, what "done" means for the
+verification section — put it to the user rather than choosing the plausible
+option and writing it down as fact. Batch the open questions into one exchange
+instead of drip-feeding them, and never ask what the tree already answers: a
+question is for a decision, a lookup is for a fact.
 
 ## 0. Triage first: quick or standard
 
@@ -32,8 +53,9 @@ assembler, anything in `src/` that a test or example will then use, a refactor a
 modules, anything with an EoC table to defend.
 
 The rule is a checklist, not a vibe: if you cannot point at the clauses that hold, it is
-standard. When it is genuinely borderline, say so and ask the user rather than guessing —
-the cost difference between the two modes is exactly what they are choosing.
+standard. When it is genuinely borderline, say so and ask the user rather than guessing
+(the standing rule above, and here for a concrete reason) — the cost difference between
+the two modes is exactly what they are choosing.
 
 ### What each mode produces
 

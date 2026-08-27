@@ -79,14 +79,16 @@ narration while keeping doxygen, theory links, complexity notes and real TODOs.
 Cost control rests on an asymmetry: **writing is cheap, checking is expensive.**
 A well-grounded spec (opus `gismo:spec-writer`) lets the three implementers run
 on sonnet, while the adversarial gate that has to catch what they missed stays
-on opus (`gismo:task-reviewer`). The loop-driver is sonnet — it only dispatches
-and reads verdicts.
+on opus (`gismo:task-reviewer`). The loop-driver is sonnet — it dispatches,
+reads verdicts and steers a running agent back on course, but implements
+nothing itself.
 
 Every working agent may delegate lookups downward instead of reading the library
 itself: `gismo:scout` (haiku) answers one settled fact per call with a
 `file:line` citation, and `gismo:indexer` (sonnet) handles questions that need
 real exploration. Spawn rules: the orchestrator spawns spec-writers and
-task-leads; a task-lead spawns its task's agent and the reviewer; spec-writer,
+task-leads; a task-lead spawns its task's agent and the reviewer, and may
+message those two — and only those two — while they run; spec-writer,
 the implementers, the reviewer, doc-writer and debugger may spawn scout and
 indexer; the three implementers may additionally spawn `gismo:advisor` (opus,
 capped at 2 per task); scout, indexer and advisor spawn nothing.
