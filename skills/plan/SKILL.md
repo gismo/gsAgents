@@ -1,7 +1,7 @@
 ---
 name: plan
 description: G+Smo planning conventions — triage the request into quick or standard mode, then write a plan.md (and, in standard mode, a decomposition) that implementer agents can execute without discovery. Use at the end of plan mode for any G+Smo change, before invoking /gismo:implement.
-allowed-tools: Read, Write, Grep, Glob, TaskCreate, TaskGet, TaskList, TaskUpdate
+allowed-tools: Read, Write, Grep, Glob, Bash, Agent, TaskCreate, TaskGet, TaskList, TaskUpdate
 argument-hint: "[--quick|--full]"
 ---
 
@@ -72,6 +72,8 @@ it to choose its path. Then: **Context** (why; problem; intended outcome) → **
 
 Ground the plan in reality first:
 - Locate everything via the generated maps (`.claude/gismo-maps/library-map.md`, `.claude/gismo-maps/modules/<mod>.md`) and read the key existing files. A plan that names a function that doesn't exist produces blocked tasks.
+- The maps are per-checkout and absent on a fresh clone. If the one you need is missing, generate it (`/gismo:tree`, `/gismo:module-map`) rather than planning without it — an ungrounded plan is the most expensive thing you can hand the framework, because every task built on it blocks.
+- Delegate lookups instead of reading the library yourself: `gismo:scout` (**haiku**) for one settled fact — an exact signature, where a class lives, which suite covers a feature — dispatching several scouts in the same message when the plan needs several facts, and `gismo:indexer` (**sonnet**) when grounding needs real exploration. Never pass a `model` argument to the Agent tool: the tier is fixed by each agent's own definition (see the dispatch rule in `TASK_CONTRACT.md`).
 - Reuse before writing: name the existing G+Smo classes/utilities each task should build on, with paths.
 - For submodule work, note that `optional/<module>` is its own git repo.
 

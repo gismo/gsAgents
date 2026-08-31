@@ -24,11 +24,9 @@ The config file is `.claude/gismo-dev.local.json` at the repo root (gitignored):
 
 3. **Ask the user** which build dir to use, and how many parallel jobs. For jobs, offer 1 / 2 / 4 (default) and note the hard cap: scripts clamp to `nproc/2` because unbounded `-j` has crashed machines by exhausting RAM.
 
-   Also ask **who advises the sonnet implementers**, because they must have exactly one advisor, not two:
-   - `agent` (default) — no Claude Code advisor configured; implementers consult the `gismo:advisor` subagent at two mandatory points.
-   - `native` — the user has `advisorModel` set (or runs `/advisor` / `--advisor`); subagents inherit it, so implementers skip `gismo:advisor` and rely on the native one.
+   Do **not** ask who advises the implementers. `gismo_env.sh` detects that itself by reading `advisorModel` out of the project and user settings files (and honouring `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`), so it stays correct across `/advisor` and `/advisor off` with no config edit. A hand-set value was the bug: whenever it said `agent` while an advisor was in fact configured, every implementer got both advisors — the exact doubling the switch exists to prevent.
 
-   Check before asking: `grep -h advisorModel ~/.claude/settings.json .claude/settings.json 2>/dev/null` — a hit means `native` is the right answer. If the user later runs `/advisor off`, re-run this skill to switch back to `agent`.
+   One case is undetectable: `claude --advisor <model>` is a per-session flag that touches no file. Ask about it only if the user mentions launching that way, and pass `native` to pin it.
 
 4. **Write the config** with the deterministic script (never write the JSON by hand):
    ```
