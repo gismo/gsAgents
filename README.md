@@ -240,6 +240,7 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 | `/gismo:run-tests` | Build + run unit tests, optionally filtered |
 | `/gismo:tree` | Core-library map (src/, examples/, unittests/) |
 | `/gismo:module-map` | Per-submodule context for `optional/` modules |
+| `/gismo:diagnose` | Mine past runs, transcripts and memory for recurring agent defects |
 
 ## Installation
 

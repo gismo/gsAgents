@@ -51,6 +51,10 @@ Makefile
 *.log
 logs/
 
+# Diagnostics runs (/gismo:diagnose). These quote private working notes from
+# transcripts and memory documents; they stay local by design.
+.claude/diagnostics/
+
 # Temporary files
 temp_ws/
 *.tmp
