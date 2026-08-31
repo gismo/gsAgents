@@ -94,6 +94,25 @@ If a task genuinely needs a stronger model than its agent declares, that is not
 a dispatch-time tweak: the implementers escalate one decision to `gismo:advisor`
 (opus), and everything else is the orchestrator's call to make in the spec.
 
+**The rule above governs `gismo:*` agents, whose tier is declared in their own
+file. Generic agent types are the exact opposite case.** `Explore`, `Plan`,
+`general-purpose` and `fork` declare no model — they **inherit the caller's**.
+For them, omitting `model` is not neutrality, it silently runs exploration on
+the most expensive tier in the session. So when you dispatch a generic type,
+**pass `model: haiku`** for mechanical extraction, counting or a settled
+lookup, and `model: sonnet` when the answer needs synthesis.
+
+Both halves are the same principle — the tier is never an accident — and they
+have been confused before: one run fanned a generic agent out into eleven
+sub-agents on the top tier before the user stopped it. Prefer `gismo:scout`
+(haiku) or `gismo:indexer` (sonnet) over a generic type in the first place;
+they carry their tier with them and cannot inherit yours.
+
+Cheapest of all is not dispatching. A subagent pays a full system prompt and
+tool schemas before doing any work, so a `find`/`grep`/`wc` you could run
+inline costs less run directly than delegated — delegate a lookup to protect
+context, not to save tokens, and know which one you are buying.
+
 ## Spec-writer protocol (gismo:spec-writer)
 
 The orchestrator decomposes; one spec-writer per task writes the file.
@@ -163,7 +182,13 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 1. If your dispatch included a native task ID, mark it `in_progress`
    (`TaskUpdate`) before doing anything else — you own that transition now,
    not your dispatcher. No ID means no matching native task; skip this
-   silently rather than searching for one.
+   silently rather than searching for one. Then log your own dispatch:
+   append `<UTC ISO timestamp, date -u +%FT%TZ>\t<task-file basename>\t<your agent name>\t<round>`
+   (tab-separated; round `0` initially, `N` when your prompt carries a review
+   file for repair round N) to `dispatches.log` beside your task file's
+   `tasks/` directory (`.claude/plans/<slug>/dispatches.log`). Your dispatcher
+   cannot write files; this log is the only record of how many agents a run
+   actually spent, and the `diagnose` skill reads it.
 2. Read YOUR task file only, plus the context it points to. Never read plan.md.
    For small factual gaps (a location, a signature, a convention) spawn
    `gismo:scout` (haiku) — one question per scout, so several facts mean
@@ -275,29 +300,64 @@ depth) and batch (dispatched by the orchestrator with the run's deferred
 `light`/`none` tasks; depth scaled per task's level, one `NN-review.md`
 each, plus cross-task consistency notes). Both follow:
 
-1. Read the task spec, the report, and `git diff -- <listed files>` (plus
-   `git status --short` to catch out-of-scope edits).
+1. Log your own dispatch as the implementer does: append
+   `<UTC ISO timestamp, date -u +%FT%TZ>\t<task-file basename>\tgismo:task-reviewer\t<round>` to
+   `.claude/plans/<slug>/dispatches.log` (one line per task when dispatched in
+   batch mode). Then read the task spec, the report, and
+   `git diff -- <listed files>` (plus
+   `git status --short` to catch out-of-scope edits). When the spec's
+   `Parallelizable-with:` line implies a dependency (an earlier task it is
+   *not* listed as parallel with), also read that task's report and
+   `git diff` over its own `## Files` list — a test that passes vacuously or
+   by the opposite mechanism from what it claims is only visible to a
+   reviewer holding both the test and the code it tests.
 2. Audit the report's evidence (genuine STATUS lines, output consistent with
    the diff); re-run the test command **only** when that evidence is missing,
    inconsistent, or stale — not as a routine step. Spend the effort attacking
    instead: hostile/degenerate inputs against the built binaries, probes of
    numerical hazards seen in the diff, and checks that each new test can
-   actually fail. A successful in-scope attack is a FAIL with the exact
-   reproduction command.
-3. Write `NN-review.md`: verdict `PASS` or `FAIL`, for FAIL a numbered list
+   actually fail; on a task with a dependency (per step 1), does the test
+   actually exercise the case the dependency implemented? A successful
+   in-scope attack is a FAIL with the exact reproduction command.
+3. Write `NN-review.md`: on a repair round the file already exists — never
+   overwrite it, append a new `## Round N` section with its own `VERDICT:`
+   line below the existing rounds, and rewrite line 1 to that latest verdict
+   (task-lead reads only line 1, so it must always be current). Verdict `PASS`
+   or `FAIL`, for FAIL a numbered list
    of required fixes (each concrete enough to act on without re-investigation),
    and a `Notes:` section for non-blocking findings — report everything found,
    at every severity; only blocking findings decide the verdict.
-   Check for: acceptance criteria met, evidence genuine (STATUS: OK present),
-   G+Smo conventions, comment discipline (change-narration or process
-   scaffolding left in the source is a `Notes:` finding — blocking only if it
-   is so thick it obscures the code), no out-of-scope files touched, no scope
-   creep, and — on
-   test tasks — falsification evidence (each new test observed to FAIL once,
-   per the test-writer's protocol) present in the report. The report should
-   also carry the `gismo:advisor` verdict lines; advice that was solicited and
-   then ignored is worth a note, and a decision the implementer clearly made
-   alone is worth a look.
+   Check for, in this order — the order is measured from 77 fixes this
+   reviewer actually demanded across the run corpus, not assumed:
+
+   1. **Does the report describe what the diff really does?** This is the
+      single largest defect class in the corpus: between a third and a half
+      of all demanded fixes are about what the implementer *wrote* — its
+      report, its doc claims, its stated justification — rather than what it
+      built. (31% of 72 corpus fixes name a report claim explicitly; ~49%
+      once false documentation claims and report-structure gaps are folded
+      in.) A report that
+      claims a hedge, a scope, a measurement or a rationale the artifact does
+      not carry is a blocking finding, because the orchestrator reads the
+      report and cannot see the diff. Check every load-bearing claim against
+      the artifact, including quoted numbers and line references.
+   2. **Acceptance criteria demonstrably met**, and evidence genuine
+      (`STATUS: OK` present, output consistent with the diff).
+   3. **Correctness**: numerical-stability hazards, unmet criteria, logic
+      defects, silent narrowing.
+   4. **Documentation claims**: doxygen or note text asserting more than the
+      source of truth supports, and stale comments the change invalidated.
+   5. On test tasks, **falsification evidence** (each new test observed to
+      FAIL once, per the test-writer's protocol) present in the report.
+   6. No out-of-scope files touched, no scope creep.
+   7. **G+Smo conventions** (`give()` not `std::move`, GISMO_EXPORT/.cpp for
+      non-template free functions, h/hpp/_.cpp split) and comment discipline.
+      Real, but rare: 2 of 77 corpus fixes. Do not spend the pass here, and
+      do not let a clean convention sweep stand in for check 1.
+
+   The report should also carry the `gismo:advisor` verdict lines; advice
+   solicited and then ignored is worth a note, and a decision the implementer
+   clearly made alone is worth a look.
 
 ## Build safety (absolute, for every agent)
 

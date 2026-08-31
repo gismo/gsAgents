@@ -28,6 +28,9 @@ File: <path to the spec you wrote, or the entry you could not ground>
 followed by two short lists:
 
 - `Gaps:` — every pointer from the plan you could not verify, and what you did instead (omitted it, or blocked).
+- `Feasible:` — `yes`, or `no — <one line>` when the entry's premise cannot be
+  met within its stated scope/files (an architecture change the plan puts out
+  of scope, an empirical premise the tree contradicts).
 - `New facts:` — the facts you looked up that are **not specific to your task** and are not already in the ledger, one line each with a `file:line` citation. The orchestrator folds these into `context.md` for the next wave of spec-writers, so a fact you found is a scout call a sibling never has to make. `none` when there are none; do not pad this with your task's own details.
 
 Keep the message short: the spec file is the deliverable, your message is a pointer and an exception report. `BLOCKED` is for a decomposition entry so ungrounded that no useful spec can be written; a spec with a couple of noted gaps is `WRITTEN`.
