@@ -83,9 +83,35 @@ gismo_env() {
     # --- advisor mode: who advises the sonnet implementers ---
     #   agent  (default) -> implementers consult the gismo:advisor subagent
     #   native           -> Claude Code's own advisor is configured (advisorModel);
-    #                       implementers skip gismo:advisor so advice is not doubled
+    #                       subagents inherit it, so implementers skip gismo:advisor
+    #                       and advice is not doubled.
+    #
+    # Detected, not declared. A hand-set config value goes stale the moment the
+    # user runs /advisor or /advisor off, and a stale `agent` is the expensive
+    # failure: every implementer then gets both advisors. So settings.json is
+    # read directly, and the config file can only escalate to `native` — never
+    # override a detected native back down to `agent`.
+    #
+    # Undetectable: `claude --advisor <model>` is a per-session flag that touches
+    # no file. Set advisor=native in the config (or GISMO_ADVISOR in the
+    # environment) when you launch that way.
     if [ -z "${GISMO_ADVISOR:-}" ]; then
-        GISMO_ADVISOR="${cfg_advisor:-agent}"
+        GISMO_ADVISOR=agent
+        # CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 ignores any configured advisorModel,
+        # so there is no native advisor to defer to whatever the settings say.
+        if [ "${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-}" != "1" ]; then
+            local s
+            for s in "$GISMO_ROOT/.claude/settings.local.json" \
+                     "$GISMO_ROOT/.claude/settings.json" \
+                     "$HOME/.claude/settings.json"; do
+                [ -f "$s" ] || continue
+                if python3 -c "import json,sys;sys.exit(0 if json.load(open(sys.argv[1])).get('advisorModel') else 1)" "$s" 2>/dev/null; then
+                    GISMO_ADVISOR=native
+                    break
+                fi
+            done
+        fi
+        [ "$cfg_advisor" = "native" ] && GISMO_ADVISOR=native
     fi
     case "$GISMO_ADVISOR" in agent|native) ;; *) GISMO_ADVISOR=agent ;; esac
     export GISMO_ADVISOR

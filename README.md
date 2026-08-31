@@ -64,9 +64,13 @@ and the cost model that rests on it — has to be checked against the transcript
 which record the resolved model on every message.
 
 ```
+/gismo:audit-models                      # or, directly:
 scripts/audit-agent-models.py            # every session for this project
 scripts/audit-agent-models.py --quiet    # mismatches only; exit 1 if any
 ```
+
+Transcripts are per-machine, so this audits runs that happened where you run
+it — not another machine, and not a cloud session.
 
 Each run is reported as `declared=<tier> ran=<tier>`, and a mismatch names the
 cause — whether the dispatching call passed a `model` argument or the harness
@@ -100,17 +104,29 @@ imitate). A pointer the plan names but the tree lacks comes back as a
 
 The sonnet tiers assume a good spec. Where the spec runs out, the implementers
 get advice rather than guessing — from **one** source, never two. Which one is
-a config switch, `advisor` in `.claude/gismo-dev.local.json` (set by
-`/gismo:dev-config`, surfaced to every agent as `GISMO_ADVISOR`):
+**detected, not configured**: `gismo_env.sh` reads `advisorModel` out of the
+project and user settings files and surfaces the answer to every agent as
+`GISMO_ADVISOR`.
 
-| `advisor` | Who advises | Use when |
+| `GISMO_ADVISOR` | Who advises | Detected when |
 |---|---|---|
-| `agent` (default) | The `gismo:advisor` subagent, at two mandatory points | No Claude Code advisor configured |
-| `native` | Claude Code's own advisor, inherited by every subagent | You have `advisorModel` set |
+| `agent` (default) | The `gismo:advisor` subagent, at three trigger points | No `advisorModel` in settings, or `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` |
+| `native` | Claude Code's own advisor, inherited by every subagent | `advisorModel` is set — including via `/advisor` |
 
-Set it to `native` if you run with `advisorModel`, and the implementers skip
-`gismo:advisor` entirely — you are advised once, by the better mechanism. Run
-`/gismo:dev-config` again after `/advisor off` to switch back.
+So `/advisor opus` and `/advisor off` take effect on the next agent run with no
+config edit. This used to be a value you set by hand, which was a mistake: the
+moment it said `agent` while an advisor was in fact configured, every
+implementer got advised twice — precisely what the switch exists to prevent.
+The `advisor` key in `.claude/gismo-dev.local.json` survives for the one
+undetectable case, `claude --advisor <model>`, which touches no file; it can
+only escalate to `native`, never talk the detector out of one it found.
+
+Worth knowing before you enable it: subagents inherit the advisor and apply the
+[pairing check](https://code.claude.com/docs/en/advisor#choose-an-advisor-model)
+against their own model, so `advisorModel: opus` attaches an opus advisor to
+*every* gismo subagent that accepts one — the haiku scout included. A one-fact
+lookup does not need an opus second opinion; if that shows up in your bill,
+that is where it comes from.
 
 **`gismo:advisor` (opus) — the shipped fallback.** Three trigger points, capped
 at 2 consults per task — the first two fire on need, the third on risk:
@@ -200,6 +216,7 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 | `/gismo:run-tests` | Build + run unit tests, optionally filtered |
 | `/gismo:tree` | Core-library map (src/, examples/, unittests/) |
 | `/gismo:module-map` | Per-submodule context for `optional/` modules |
+| `/gismo:audit-models` | Check each subagent ran on the tier its definition declares |
 
 ## Installation
 

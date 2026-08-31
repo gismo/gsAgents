@@ -131,8 +131,13 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    - `GISMO_ADVISOR=native` — Claude Code's own advisor is configured and
      subagents inherit it, so it is already advising you. **Do not consult
      `gismo:advisor`**; note `Advisor: native` in your report and move on.
+     The native advisor returns prose, not a verdict line: it has no
+     `ADVICE:` string, so your report must never contain one on a native run.
    - `GISMO_ADVISOR=agent` (the default) — no native advisor is configured.
      Consult `gismo:advisor` (opus) at the trigger points below.
+
+   The value is detected from the harness, not declared by you — never override
+   it or reason about which advisor "should" apply. Run the script and obey it.
 
    Three trigger points — the first two fire on need, the third on risk:
    a. **Open decision.** Whenever you are about to commit to a numerical or API
@@ -152,9 +157,13 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    than advice after.
    Act on its verdict line: `ADVICE: PROCEED` → follow the recommendation;
    `ADVICE: SPEC DECIDES` → you misread the spec, follow the spec;
-   `ADVICE: BLOCKED` → report `RESULT: BLOCKED` relaying its reasoning. Record
-   every consult's verdict line in your report so the reviewer can see what was
-   advised. Never settle an open judgment call by guessing.
+   `ADVICE: BLOCKED` → report `RESULT: BLOCKED` relaying its reasoning. Copy
+   every consult's verdict line into your report **verbatim** — it is one of
+   those three exact strings and nothing else, pasted from the consult you
+   actually made, never reconstructed from memory or composed to summarise
+   advice. A verdict line in a report is evidence that a consult happened; an
+   invented one is fabricated evidence, and the reviewer treats it as such.
+   Never settle an open judgment call by guessing.
 3. Verify, in order:
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
@@ -163,7 +172,12 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    (the STATUS lines + relevant output tails), and any deviation from the spec
    with its reason. Every claim must be auditable against a tool result from
    this run — only report work you can point to evidence for; if something is
-   unverified or failing, say so plainly instead of hedging. End the file with
+   unverified or failing, say so plainly instead of hedging. **Anything the
+   report presents as quoted — a STATUS line, an advisor verdict, a compiler
+   error, test output — is copied character-for-character from a tool result in
+   this run.** Paraphrase freely in your own prose, but never dress a summary
+   up as a quotation: a plausible-looking quote that no tool produced is worse
+   than no quote, because it survives review that real evidence would not. End the file with
    `RESULT: DONE` or `RESULT: BLOCKED`.
 5. You operate autonomously: nobody answers questions mid-task. Never end your
    turn on a question, a plan, or a promise ("I'll now build...") — end only
@@ -181,7 +195,14 @@ each, plus cross-task consistency notes). Both follow:
    `git status --short` to catch out-of-scope edits).
 2. Audit the report's evidence (genuine STATUS lines, output consistent with
    the diff); re-run the test command **only** when that evidence is missing,
-   inconsistent, or stale — not as a routine step. Spend the effort attacking
+   inconsistent, or stale — not as a routine step. Quoted evidence is checkable
+   on its face: an advisor verdict line that is not exactly `ADVICE: PROCEED`,
+   `ADVICE: SPEC DECIDES` or `ADVICE: BLOCKED`, or any `ADVICE:` line at all in
+   a report marked `Advisor: native` (the native advisor emits no verdict
+   line), was not produced by any advisor. Fabricated evidence is a `FAIL` on
+   its own — the numbered fix is to remove the invented quote and state what
+   actually happened — and it means the rest of the report's quotes need
+   checking rather than trusting. Spend the effort attacking
    instead: hostile/degenerate inputs against the built binaries, probes of
    numerical hazards seen in the diff, and checks that each new test can
    actually fail. A successful in-scope attack is a FAIL with the exact
