@@ -37,7 +37,7 @@ the rubric — say so and obey it.
 
 A request is **quick** when *all* of these hold:
 
-- it decomposes into **at most 2 tasks** as sized below;
+- it decomposes into **at most 2 coherent tasks**;
 - it adds **no new public API** (no new class, no new public method or free function
   that other code is expected to call);
 - it changes **no numerical algorithm** — no new discretisation, quadrature, solver
