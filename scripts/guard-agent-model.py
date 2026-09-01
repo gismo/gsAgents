@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: refuse Agent calls that override a gismo agent's tier.
+"""PreToolUse guard: refuse Agent calls that override a gismo agent's tier,
+and refuse a generic agent type dispatched with no tier at all.
 
 An explicit `model` argument on the Agent tool takes precedence over the agent
 file's frontmatter, so a dispatcher can silently promote the haiku scout to opus
 and nothing in the agent definition would show it. This denies such calls at the
 point of dispatch, with a reason the caller sees.
 
+Generic types (`Explore`, `Plan`, `general-purpose`, `fork`, or no
+`subagent_type` at all) declare no model of their own — they inherit the
+caller's, so omitting `model` silently runs them on whatever tier the caller
+is. This also denies that, per the dispatch rule in TASK_CONTRACT.md.
+
 The plugin wires this itself in `hooks/hooks.json`, so it is active on install
-with no configuration. Calls to agents outside this plugin, calls that pass no
-model, and calls whose model is on the tier the agent already declares are all
-left to the normal permission flow.
+with no configuration. Calls to agents outside this plugin, and calls whose
+model is on the tier the agent already declares, are left to the normal
+permission flow.
 """
 
 import json
@@ -18,6 +24,7 @@ import sys
 from pathlib import Path
 
 TIER = re.compile(r"haiku|sonnet|opus|fable")
+GENERIC_TYPES = {"", "explore", "plan", "general-purpose", "fork"}
 
 
 def declared_tiers(agents_dir):
@@ -42,6 +49,19 @@ def declared_tiers(agents_dir):
     return declared
 
 
+def deny(reason):
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        },
+        sys.stdout,
+    )
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -51,6 +71,14 @@ def main():
     tool_input = payload.get("tool_input") or {}
     override = tool_input.get("model")
     subagent = tool_input.get("subagent_type") or ""
+
+    if not override and subagent.lower() in GENERIC_TYPES:
+        deny(
+            "Generic subagent types inherit the caller's model tier; pass "
+            "model: haiku or sonnet (see TASK_CONTRACT.md §Dispatch rule)."
+        )
+        return 0
+
     if not override or not subagent:
         return 0
 
@@ -65,22 +93,14 @@ def main():
     # concrete id ("claude-haiku-4-5-20251001"). Same tier either way is not an
     # override. An unrecognised string is denied — a model this guard cannot
     # place against a tier is exactly the case worth stopping.
-    if TIER.search(override) and TIER.search(override).group(0) == want:
+    found = TIER.search(override)
+    if found and found.group(0) == want:
         return 0
 
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    f"{subagent} declares model: {want}; this call passes model={override}, "
-                    f"which overrides it. Drop the model argument to run {bare} on its own "
-                    f"tier, or dispatch a different agent if you need {override}."
-                ),
-            }
-        },
-        sys.stdout,
+    deny(
+        f"{subagent} declares model: {want}; this call passes model={override}, "
+        f"which overrides it. Drop the model argument to run {bare} on its own "
+        f"tier, or dispatch a different agent if you need {override}."
     )
     return 0
 

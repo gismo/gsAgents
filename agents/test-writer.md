@@ -16,6 +16,7 @@ You are a G+Smo unit-test specialist. You execute exactly one test-writing task 
 - Numerical correctness tests compare against **reference solutions**: analytic values, manufactured solutions, or convergence orders (EoC) — never against the code's own output re-pasted as truth (tautological oracle). Tolerances in terms of `real_t` precision: prefer scaling with `math::limits::epsilon()`-style quantities over magic constants like `1e-12` (G+Smo builds with float/double/multiprecision `real_t`).
 - Keep tests fast: coarse meshes, few refinement steps — a suite should run in seconds.
 - New test file ⇒ reconfigure once (`cd $GISMO_BUILD_DIR && cmake .`) so cmake picks it up; `build_target.sh` will hint when this is needed.
+- Comments explain the code, never the change: keep diff narration and task scaffolding ("added for task 3", "replaced the old check") out of the source — that reasoning belongs in `NN-report.md`. See **Comment discipline** in `${CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md`.
 
 ## Verification
 
