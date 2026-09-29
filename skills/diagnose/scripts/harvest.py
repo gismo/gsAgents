@@ -18,7 +18,8 @@ not assumed):
 
 - Review files accumulate repair rounds *in the same file*, each carrying
   its own ``VERDICT:`` line. A file's verdicts are therefore a *sequence*
-  (e.g. ``["FAIL", "PASS"]``), never a single value. The round boundary is
+  (e.g. ``["FAIL", "PASS"]`` or ``["FAIL", "PASS (FIX-UPS)"]``), never a
+  single value. The round boundary is
   sometimes a heading matching ``^#+\\s*Round \\d`` -- but not always: the
   corpus also uses prose headings (``## Re-review (repair round 1)``) or no
   heading at all, only a restated ``VERDICT:`` line. The parser therefore
@@ -197,19 +198,72 @@ class Record:
 # ---------------------------------------------------------------------------
 
 _ROUND_HEADER_RE = re.compile(r"^#{1,6}\s*Round\s+\d+", re.IGNORECASE | re.MULTILINE)
-_VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL)\b", re.IGNORECASE | re.MULTILINE)
+# ``PASS (fix-ups)`` is a third verdict, not a decorated PASS: it routes a
+# textual-only defect to a one-shot correction instead of a repair round, so a
+# tally that folds it into PASS loses exactly the signal this measures. The
+# alternation is ordered most-specific-first, and the word boundary sits inside
+# the plain alternatives -- after ``)`` it would never match.
+_VERDICT_RE = re.compile(
+    r"^VERDICT:\s*(PASS\s*\(fix-ups\)|PASS\b|FAIL\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$", re.MULTILINE)
 _REQUIRED_FIXES_TITLE_RE = re.compile(r"required\s+fix", re.IGNORECASE)
+# "Required fix-ups" is the PASS (fix-ups) list; it also matches the pattern above,
+# so it is tested first.
+_REQUIRED_FIXUPS_TITLE_RE = re.compile(r"required\s+fix-?ups?", re.IGNORECASE)
 _NUMBERED_LINE_RE = re.compile(r"^(\d+)\.[ \t]+(.+?)\s*$", re.MULTILINE)
+
+
+_FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+
+
+def mask_fences(text: str) -> str:
+    """Return `text` with the content of fenced code blocks replaced by spaces.
+
+    Offsets, line breaks and the fence delimiter lines are preserved, so a match
+    position in the masked text indexes the original. Reports quote logs whose
+    lines start with ``#`` (``# command:``, ``# exit:``); scanned as-is those
+    look like headings and would truncate the section that cites them. A fence
+    left unclosed runs to the end of the text, as in CommonMark.
+    """
+    out: List[str] = []
+    fence = ""
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if not fence:
+            m = _FENCE_OPEN_RE.match(body)
+            if m:
+                fence = m.group(1)
+            out.append(line)
+            continue
+        closing = body.strip()
+        if closing and set(closing) == {fence[0]} and len(closing) >= len(fence):
+            fence = ""
+            out.append(line)
+        else:
+            out.append(re.sub(r"[^\r\n]", " ", line))
+    return "".join(out)
+
+
+def normalize_verdict(raw: str) -> str:
+    """Canonicalize a matched verdict to ``PASS``, ``PASS (FIX-UPS)`` or ``FAIL``."""
+    collapsed = " ".join(raw.split()).upper()
+    return "PASS (FIX-UPS)" if collapsed.startswith("PASS") and "FIX-UPS" in collapsed else collapsed
 
 
 @dataclass
 class ReviewFix:
-    """One numbered fix line, scoped to a `## Required fixes` region."""
+    """One numbered line, scoped to a `## Required fixes` (FAIL) or
+    `## Required fix-ups` (PASS (fix-ups)) region."""
 
     round_index: int
     number: int
     text: str
+    fixup: bool = False
+    verdict: str = ""
 
 
 @dataclass
@@ -252,16 +306,20 @@ def split_review_rounds(text: str) -> List[str]:
     ]
 
 
-def required_fixes_regions(segment: str) -> List[str]:
-    """Return the text spans headed by a "Required fixes" heading (or a
-    close variant), bounded by the next heading of any level or EOF."""
-    headings = list(_HEADING_RE.finditer(segment))
+def required_fixes_regions(segment: str) -> List[Tuple[bool, str]]:
+    """Return ``(is_fixup, text)`` for the spans headed by a "Required fixes"
+    or "Required fix-ups" heading (or a close variant), bounded by the next
+    heading of any level or EOF."""
+    masked = mask_fences(segment)
+    headings = list(_HEADING_RE.finditer(masked))
     regions = []
     for i, h in enumerate(headings):
-        if _REQUIRED_FIXES_TITLE_RE.search(h.group(2)):
+        title = h.group(2)
+        is_fixup = bool(_REQUIRED_FIXUPS_TITLE_RE.search(title))
+        if is_fixup or _REQUIRED_FIXES_TITLE_RE.search(title):
             start = h.end()
             end = headings[i + 1].start() if i + 1 < len(headings) else len(segment)
-            regions.append(segment[start:end])
+            regions.append((is_fixup, segment[start:end]))
     return regions
 
 
@@ -275,16 +333,20 @@ def parse_review_text(text: str) -> ReviewParse:
 
     for round_index, segment in enumerate(segments, start=1):
         verdict_match = _VERDICT_RE.search(segment)
+        segment_verdict = ""
         if verdict_match:
-            verdict_sequence.append(verdict_match.group(1).upper())
+            segment_verdict = normalize_verdict(verdict_match.group(1))
+            verdict_sequence.append(segment_verdict)
 
-        for region in required_fixes_regions(segment):
+        for is_fixup, region in required_fixes_regions(segment):
             for num_match in _NUMBERED_LINE_RE.finditer(region):
                 fixes.append(
                     ReviewFix(
                         round_index=round_index,
                         number=int(num_match.group(1)),
                         text=num_match.group(2).strip(),
+                        fixup=is_fixup,
+                        verdict=segment_verdict,
                     )
                 )
             lowered = region.lower()
@@ -299,10 +361,11 @@ def parse_review_text(text: str) -> ReviewParse:
 # ---------------------------------------------------------------------------
 
 _RESULT_RE = re.compile(r"^RESULT:\s*(DONE|BLOCKED)\b", re.MULTILINE)
+_FIXUPS_RE = re.compile(r"^FIXUPS:\s*(APPLIED|BLOCKED)\b", re.MULTILINE)
 _STATUS_RE = re.compile(r"^STATUS:\s*(OK|FAIL)\b", re.MULTILINE)
 _ADVISOR_RE = re.compile(r"^Advisor:\s*(.+)$", re.MULTILINE)
 _TRIVIAL_DEVIATION_RE = re.compile(r"^(none|n/?a|-)\.?$", re.IGNORECASE)
-_BLOCKED_CONTEXT_RE = re.compile(r"(.{0,600})RESULT:\s*BLOCKED", re.DOTALL)
+_BLOCKED_LINE_RE = re.compile(r"^RESULT:\s*BLOCKED\b", re.MULTILINE)
 _RESULT_LINE_RE = re.compile(r"^RESULT:\s*(DONE|BLOCKED)\b", re.MULTILINE)
 
 
@@ -311,17 +374,30 @@ class ReportParse:
     """Result of parsing one report file's full text."""
 
     result_tallies: Dict[str, int]
+    fixups_tallies: Dict[str, int]
     status_tallies: Dict[str, int]
     advisor_lines: List[str]
     deviations: List[str]
 
 
 def parse_report_text(text: str) -> ReportParse:
-    """Parse one report file's ``RESULT:``/``STATUS:`` lines, ``Advisor:``
-    lines, and non-trivial deviation passages."""
+    """Parse one report file's final ``RESULT:`` line, ``FIXUPS:`` lines,
+    ``STATUS:`` lines, ``Advisor:`` lines, and non-trivial deviation passages.
+
+    A report grows by appended ``## Round N`` sections, each ending in its own
+    completion line, so the file's result is the last ``RESULT:`` line in it
+    (``result_tallies`` holds that one entry, or none); earlier rounds'
+    results are superseded. ``FIXUPS:`` lines are counted apart.
+    """
+    masked = mask_fences(text)
     result_tallies: Dict[str, int] = {}
-    for m in _RESULT_RE.finditer(text):
-        result_tallies[m.group(1)] = result_tallies.get(m.group(1), 0) + 1
+    result_matches = list(_RESULT_RE.finditer(masked))
+    if result_matches:
+        result_tallies[result_matches[-1].group(1)] = 1
+
+    fixups_tallies: Dict[str, int] = {}
+    for m in _FIXUPS_RE.finditer(masked):
+        fixups_tallies[m.group(1)] = fixups_tallies.get(m.group(1), 0) + 1
 
     status_tallies: Dict[str, int] = {}
     for m in _STATUS_RE.finditer(text):
@@ -330,7 +406,7 @@ def parse_report_text(text: str) -> ReportParse:
     advisor_lines = [m.group(1).strip() for m in _ADVISOR_RE.finditer(text)]
 
     deviations: List[str] = []
-    headings = list(_HEADING_RE.finditer(text))
+    headings = list(_HEADING_RE.finditer(masked))
     for i, h in enumerate(headings):
         if "deviation" not in h.group(2).lower():
             continue
@@ -339,23 +415,27 @@ def parse_report_text(text: str) -> ReportParse:
         # section has no heading after it -- at the trailing RESULT: line,
         # whichever comes first.
         end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
-        result_match = _RESULT_LINE_RE.search(text, start)
+        result_match = _RESULT_LINE_RE.search(masked, start)
         if result_match and result_match.start() < end:
             end = result_match.start()
         body = text[start:end].strip()
         if body and not _TRIVIAL_DEVIATION_RE.match(body):
             deviations.append(body)
 
-    return ReportParse(result_tallies, status_tallies, advisor_lines, deviations)
+    return ReportParse(
+        result_tallies, fixups_tallies, status_tallies, advisor_lines, deviations
+    )
 
 
 def blocked_passage(text: str) -> str:
     """Return the paragraph immediately preceding a ``RESULT: BLOCKED``
-    line, which is where reports state the concrete blocker."""
-    m = _BLOCKED_CONTEXT_RE.search(text)
-    if not m:
+    line (the last one, the file's result), which is where reports state
+    the concrete blocker."""
+    matches = list(_BLOCKED_LINE_RE.finditer(text))
+    if not matches:
         return "RESULT: BLOCKED"
-    context = m.group(1)
+    end = matches[-1].start()
+    context = text[max(0, end - 600) : end]
     paragraphs = [p.strip() for p in context.split("\n\n") if p.strip()]
     return paragraphs[-1] if paragraphs else "RESULT: BLOCKED"
 
@@ -721,7 +801,7 @@ def _harvest_run_dirs(
             for fix in parsed.fixes:
                 records.append(
                     Record(
-                        kind="review-fix",
+                        kind="review-fixup" if fix.fixup else "review-fix",
                         class_key=make_class_key(fix.text),
                         text=fix.text,
                         source_path=str(review_file),
@@ -732,15 +812,18 @@ def _harvest_run_dirs(
                         extra={
                             "round": fix.round_index,
                             "number": fix.number,
+                            "verdict_class": fix.verdict,
                             "verdict_sequence": parsed.verdict_sequence,
                         },
                     )
                 )
 
         result_tallies: Dict[str, int] = {}
+        fixups_tallies: Dict[str, int] = {}
         status_tallies: Dict[str, int] = {}
         advisor_line_count = 0
         deviation_count = 0
+        no_result_reports = 0
         for report_file in report_files:
             if not artifact_after(report_file, since):
                 continue
@@ -753,6 +836,10 @@ def _harvest_run_dirs(
             parsed_report = parse_report_text(text)
             for key, count in parsed_report.result_tallies.items():
                 result_tallies[key] = result_tallies.get(key, 0) + count
+            if not parsed_report.result_tallies:
+                no_result_reports += 1
+            for key, count in parsed_report.fixups_tallies.items():
+                fixups_tallies[key] = fixups_tallies.get(key, 0) + count
             for key, count in parsed_report.status_tallies.items():
                 status_tallies[key] = status_tallies.get(key, 0) + count
             advisor_line_count += len(parsed_report.advisor_lines)
@@ -812,6 +899,8 @@ def _harvest_run_dirs(
                 "verdict_tallies": verdict_tallies,
                 "total_rounds": total_rounds,
                 "result_tallies": result_tallies,
+                "no_result_reports": no_result_reports,
+                "fixups_tallies": fixups_tallies,
                 "status_tallies": status_tallies,
                 "advisor_line_count": advisor_line_count,
                 "deviation_count": deviation_count,
@@ -938,6 +1027,7 @@ def build_records(
 
 _SLICE_KIND_MAP: Dict[str, Tuple[str, ...]] = {
     "review-fixes.md": ("review-fix",),
+    "review-fixups.md": ("review-fixup",),
     "report-blocked.md": ("report-blocked",),
     "report-deviations.md": ("report-deviation",),
     "user-corrections.md": ("user-correction",),
@@ -1022,12 +1112,17 @@ def write_summary(
     """Write the human-readable `summary.md`."""
     verdict_totals: Dict[str, int] = {}
     result_totals: Dict[str, int] = {}
+    fixups_totals: Dict[str, int] = {}
     status_totals: Dict[str, int] = {}
+    no_result_total = 0
     for entry in index_entries:
+        no_result_total += entry.get("no_result_reports", 0)
         for key, count in entry["verdict_tallies"].items():
             verdict_totals[key] = verdict_totals.get(key, 0) + count
         for key, count in entry["result_tallies"].items():
             result_totals[key] = result_totals.get(key, 0) + count
+        for key, count in entry.get("fixups_tallies", {}).items():
+            fixups_totals[key] = fixups_totals.get(key, 0) + count
         for key, count in entry["status_tallies"].items():
             status_totals[key] = status_totals.get(key, 0) + count
 
@@ -1041,7 +1136,9 @@ def write_summary(
         lines.append("")
     lines.append(f"Run directories indexed: {len(index_entries)}")
     lines.append(f"Verdict tallies (review files): {verdict_totals}")
-    lines.append(f"RESULT tallies (report files): {result_totals}")
+    lines.append(f"Final RESULT per report file (last RESULT line in each): {result_totals}")
+    lines.append(f"Report files with no RESULT line (incl. RESULT lines lost to an unclosed fence): {no_result_total}")
+    lines.append(f"FIXUPS lines (report files): {fixups_totals}")
     lines.append(f"STATUS tallies (report files): {status_totals}")
     lines.append("")
     lines.append("## Extracted record counts")

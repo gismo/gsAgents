@@ -64,6 +64,36 @@ def test_review_single_round_single_verdict():
     assert parsed.round_count == 1
 
 
+def test_fixup_verdict_is_tallied_apart_from_plain_pass():
+    # PASS (fix-ups) routes a text-only defect to a one-shot correction
+    # instead of a repair round. Folding it into PASS would hide exactly
+    # the thing a diagnosis pass needs to see: how much of the review
+    # traffic is prose rather than code.
+    text = (
+        "VERDICT: PASS (fix-ups)\n\n"
+        "## Required fix-ups\n\n"
+        "1. **Report overstates the scope.** Replace line 12 with ...\n"
+    )
+    parsed = harvest.parse_review_text(text)
+    assert parsed.verdict_sequence == ["PASS (FIX-UPS)"]
+    assert parsed.round_count == 1
+    assert [f.number for f in parsed.fixes] == [1]
+
+
+def test_fixup_verdict_starts_a_round_like_any_other_verdict():
+    text = (
+        "VERDICT: FAIL\n\n"
+        "## Required fixes\n\n"
+        "1. **Guard the null case.** Detail.\n\n"
+        "VERDICT: PASS (fix-ups)\n\n"
+        "## Required fix-ups\n\n"
+        "1. **Stale comment in gsFoo.h:44.** Delete these lines.\n"
+    )
+    parsed = harvest.parse_review_text(text)
+    assert parsed.verdict_sequence == ["FAIL", "PASS (FIX-UPS)"]
+    assert len(parsed.verdict_sequence) <= parsed.round_count
+
+
 def test_verdict_count_never_exceeds_round_count():
     text = (
         "VERDICT: FAIL\n\n"
@@ -145,6 +175,24 @@ def test_fix_lines_appear_verbatim_in_source_text():
     assert len(parsed.fixes) == 2
     for fix in parsed.fixes:
         assert fix.text in text
+
+
+def test_required_fixups_are_classified_apart_from_required_fixes():
+    text = (
+        "VERDICT: FAIL\n\n"
+        "## Required fixes\n\n"
+        "1. **Real defect.** Code is wrong.\n\n"
+        "## Round 2\n\n"
+        "VERDICT: PASS (fix-ups)\n\n"
+        "## Required fix-ups\n\n"
+        "1. **Report wording.** Replace the sentence at report.md:12.\n"
+    )
+    parsed = harvest.parse_review_text(text)
+    assert [(f.fixup, f.verdict) for f in parsed.fixes] == [
+        (False, "FAIL"),
+        (True, "PASS (FIX-UPS)"),
+    ]
+    assert "Report wording" in parsed.fixes[1].text
 
 
 def test_convention_term_counting_scoped_to_required_fixes_region():
@@ -412,7 +460,7 @@ def test_harvest_writes_all_expected_outputs(tmp_path):
     entry = json.loads(index_lines[0])
     assert entry["slug"] == "demo-plan"
     assert entry["verdict_tallies"] == {"FAIL": 1}
-    assert entry["result_tallies"] == {"BLOCKED": 2}
+    assert entry["result_tallies"] == {"BLOCKED": 1}
 
     recurrence = json.loads((out_dir / "recurrence.json").read_text())
     assert all(isinstance(by_key, dict) for by_key in recurrence.values())
@@ -536,3 +584,100 @@ def test_same_slug_with_different_contents_is_kept_as_two_runs(tmp_path):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+_FENCED_LOG = (
+    "```\n"
+    "# command: bash build.sh\n"
+    "# cwd: /tmp\n"
+    "--- output ---\n"
+    "# exit: 0\n"
+    "STATUS: OK\n"
+    "```\n"
+)
+
+
+def test_fenced_hash_lines_do_not_end_a_required_fixups_region():
+    text = (
+        "VERDICT: PASS (fix-ups)\n\n"
+        "## Required fix-ups\n\n"
+        "1. Replace the fence with the log's own lines:\n\n"
+        + _FENCED_LOG
+        + "\n2. Correct the test count.\n\n"
+        "## Notes\n\nnothing\n"
+    )
+    parsed = harvest.parse_review_text(text)
+    assert [f.number for f in parsed.fixes] == [1, 2]
+    assert all(f.fixup for f in parsed.fixes)
+
+
+def test_fenced_hash_lines_do_not_truncate_a_deviation_section():
+    text = (
+        "## Deviations\n\n"
+        "Used a different tolerance, see the log:\n\n"
+        + _FENCED_LOG
+        + "\nThe rest of the explanation.\n\n"
+        "## Verification\n\nRESULT: DONE\n"
+    )
+    parsed = harvest.parse_report_text(text)
+    assert len(parsed.deviations) == 1
+    assert "# exit: 0" in parsed.deviations[0]
+    assert "The rest of the explanation." in parsed.deviations[0]
+
+
+def test_mask_fences_preserves_offsets():
+    text = "a\n```\n# x\n```\nb\n"
+    masked = harvest.mask_fences(text)
+    assert len(masked) == len(text)
+    assert "# x" not in masked and masked.count("\n") == text.count("\n")
+
+
+def test_two_round_report_counts_final_result_only():
+    text = (
+        "## Verification\n\nSTATUS: OK\n\nRESULT: BLOCKED\n\n"
+        "## Round 1\n\nFixed the blocker.\n\nRESULT: DONE\n\n"
+        "## Round 1 (fix-ups)\n\nFIXUPS: APPLIED\n"
+    )
+    parsed = harvest.parse_report_text(text)
+    assert parsed.result_tallies == {"DONE": 1}
+    assert parsed.fixups_tallies == {"APPLIED": 1}
+
+
+def test_two_round_report_is_not_flagged_report_blocked(tmp_path):
+    tasks = tmp_path / "repo" / ".claude" / "plans" / "p1" / "tasks"
+    tasks.mkdir(parents=True)
+    (tasks / "01-a.md").write_text("# Task 01\nAgent: gismo:implementer\nReview: full\n")
+    (tasks / "01-report.md").write_text(
+        "Blocked for now.\n\nRESULT: BLOCKED\n\n"
+        "## Round 1\n\nDone.\n\nRESULT: DONE\n"
+    )
+    out_dir = tmp_path / "out"
+    harvest.harvest([tmp_path], out_dir, since=None)
+    entry = json.loads((out_dir / "index.jsonl").read_text().splitlines()[0])
+    assert entry["result_tallies"] == {"DONE": 1}
+    assert not (out_dir / "slices" / "report-blocked.md").exists() or (
+        "Blocked for now" not in (out_dir / "slices" / "report-blocked.md").read_text()
+    )
+
+
+def test_tilde_fence_is_not_closed_by_a_backtick_line():
+    text = "Log:\n\n~~~\n```\nRESULT: BLOCKED\n~~~\n"
+    masked = harvest.mask_fences(text)
+    assert "RESULT: BLOCKED" not in masked
+    assert harvest.parse_report_text(text).result_tallies == {}
+
+
+def test_unclosed_fence_report_lands_in_no_result_bucket(tmp_path):
+    tasks = tmp_path / "repo" / ".claude" / "plans" / "p1" / "tasks"
+    tasks.mkdir(parents=True)
+    (tasks / "01-a.md").write_text("# Task 01\nAgent: gismo:implementer\nReview: full\n")
+    (tasks / "01-report.md").write_text("Evidence:\n\n```\n# exit: 0\n\nRESULT: DONE\n")
+    (tasks / "02-a.md").write_text("# Task 02\nAgent: gismo:implementer\nReview: full\n")
+    (tasks / "02-report.md").write_text("All good.\n\nRESULT: DONE\n")
+    out_dir = tmp_path / "out"
+    harvest.harvest([tmp_path], out_dir, since=None)
+    entry = json.loads((out_dir / "index.jsonl").read_text().splitlines()[0])
+    assert entry["result_tallies"] == {"DONE": 1}
+    assert entry["no_result_reports"] == 1
+    summary = (out_dir / "summary.md").read_text()
+    assert "Report files with no RESULT line" in summary and ": 1" in summary

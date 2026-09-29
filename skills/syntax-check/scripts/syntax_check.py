@@ -35,7 +35,7 @@ HEADER_EXT = {".h", ".hpp", ".hh"}
 def build_dir():
     bd = os.environ.get("GISMO_BUILD_DIR")
     if not bd or not os.path.isfile(os.path.join(bd, "CMakeCache.txt")):
-        sys.stderr.write("syntax_check: GISMO_BUILD_DIR not set/valid (source gismo_env.sh first)\n")
+        sys.stderr.write("syntax_check: GISMO_BUILD_DIR not set/valid (run gismo_env after sourcing gismo_env.sh)\n")
         print("STATUS: FAIL")
         sys.exit(2)
     return bd
