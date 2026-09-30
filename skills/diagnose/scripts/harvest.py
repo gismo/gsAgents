@@ -289,10 +289,13 @@ def split_review_rounds(text: str) -> List[str]:
     are the sorted union of round-header positions and verdict positions;
     a header with no verdict inside its segment still counts as a round
     (so "no more verdicts than round headers" holds even when the two
-    signals disagree on where a boundary falls).
+    signals disagree on where a boundary falls). Both are searched with
+    fenced blocks masked: a quoted ``# Round 2`` or ``VERDICT: FAIL`` inside a
+    fence is not a boundary, and no boundary falls inside a fence.
     """
-    header_starts = {m.start() for m in _ROUND_HEADER_RE.finditer(text)}
-    verdict_starts = {m.start() for m in _VERDICT_RE.finditer(text)}
+    masked = mask_fences(text)
+    header_starts = {m.start() for m in _ROUND_HEADER_RE.finditer(masked)}
+    verdict_starts = {m.start() for m in _VERDICT_RE.finditer(masked)}
     boundaries = sorted(header_starts | verdict_starts)
     if not boundaries:
         return [text]
@@ -332,7 +335,7 @@ def parse_review_text(text: str) -> ReviewParse:
     term_hits: Dict[str, int] = {term: 0 for term in CONVENTION_TERMS}
 
     for round_index, segment in enumerate(segments, start=1):
-        verdict_match = _VERDICT_RE.search(segment)
+        verdict_match = _VERDICT_RE.search(mask_fences(segment))
         segment_verdict = ""
         if verdict_match:
             segment_verdict = normalize_verdict(verdict_match.group(1))

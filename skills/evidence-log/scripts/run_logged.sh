@@ -17,8 +17,11 @@
 #   # end: <UTC ISO timestamp>
 #   # killed: <TERM|INT|HUP>    (only when the logger itself was signalled; the command's process
 #                              group is sent TERM)
-#   # exit: <exit code>
-#   STATUS: OK | FAIL (exit N) | FAIL (killed: SIG)     (always the log's last line, so it is citable)
+#   # stray: killed             (only when the command exited but members of its process group
+#                              were still running after the grace period, and were killed)
+#   # exit: <the command's exit code; 128+N when the logger's signal N ended the command>
+#   STATUS: OK | FAIL (exit N) | FAIL (killed: SIG) | FAIL (stray processes killed)
+#                              (always the log's last line, so it is citable)
 #
 # stdout and stderr share one stream so the log reads as a terminal would have shown it;
 # the two are not distinguishable afterwards.
@@ -26,11 +29,18 @@
 # Prints the log path, its line count, its md5 (all three describe the finished log,
 # STATUS line included) and the same STATUS line, and exits with the command's own exit
 # code, except that a received TERM, INT or HUP makes it 128 plus that signal's number
-# (143, 130, 129); 2 on bad usage, before anything runs.
+# (143, 130, 129), and a command that exited 0 but left stray processes makes it 1; 2 on
+# bad usage, before anything runs.
 #
 # The command runs in its own process group, so a signal to the logger stops the command
 # and everything it spawned; it is not attached to the terminal's foreground group, so
 # commands that read the TTY interactively are unsupported.
+#
+# The trailer is written only once that whole group is gone. When the command exits
+# while members it started are still running, they get ~5 s to finish (their output
+# lands before STATUS); survivors are sent TERM, then KILL, and the run is recorded as
+# failed. A descendant that leaves the group (setsid, its own job control) is invisible
+# to the logger and can still write past STATUS.
 set -u
 set +e
 
@@ -91,6 +101,32 @@ utc() { date -u +%FT%TZ; }
 killed=""
 killnum=0
 child=""
+stray=""
+# group_alive: true while the command's process group has a member that is not a
+# zombie. The group outlives its leader, so this still sees descendants after the
+# command itself has exited. Zombies are skipped because they have closed their
+# descriptors and cannot write; under a subreaper that never reaps (a container whose
+# PID 1 is not an init) orphans stay zombies indefinitely. Without ps, fall back to
+# kill -0, which counts zombies as live.
+group_alive() {
+    kill -0 -- "-$child" 2>/dev/null || return 1
+    command -v ps >/dev/null 2>&1 || return 0
+    ps -A -o pgid= -o stat= 2>/dev/null |
+        awk -v g="$child" '$1 == g && $2 !~ /^Z/ { f = 1 } END { exit !f }'
+}
+# group_gone N [stop-on-signal]: wait until the group is empty, for N seconds at most
+# (between N-1 and N, as $SECONDS ticks whole seconds; the deadline is on the clock
+# rather than a poll count because each poll runs ps); non-zero if members remain.
+# With a second argument it also gives up as soon as the logger is signalled, so the
+# signal's own grace period starts afresh.
+group_gone() {
+    local end=$((SECONDS + $1))
+    while group_alive; do
+        [ "$SECONDS" -ge "$end" ] && return 1
+        [ -n "${2:-}" ] && [ -n "$killed" ] && return 1
+        sleep 0.1
+    done
+}
 on_signal() {
     killed="$1"
     case "$1" in HUP) killnum=129 ;; INT) killnum=130 ;; *) killnum=143 ;; esac
@@ -107,18 +143,25 @@ child=$!
 set +m
 { wait "$child"; } 2>/dev/null
 rc=$?
+# A signal that interrupted wait leaves 128+N from wait, not the command's code. One
+# arriving later, during the drain below, leaves the command's real code in rc.
+[ -n "$killed" ] && rc=$killnum
+# Drain the whole group, not just its leader: members still running (cleaning up after
+# TERM, or backgrounded by a command that has already exited) would otherwise write
+# past STATUS and change the log after its md5 was printed. Each stage has a ~5 s grace
+# period. The braces keep bash's job-status notice ("Killed") off stderr.
+{
+    if [ -z "$killed" ] && ! group_gone 5 stop-on-signal && [ -z "$killed" ]; then
+        stray=1
+        kill -TERM -- "-$child"
+    fi
+    group_gone 5 || { kill -KILL -- "-$child"; sleep 0.1; }
+} 2>/dev/null
+ret=$rc
 if [ -n "$killed" ]; then
-    rc=$killnum
-    # Drain the whole group, not just its leader: members still cleaning up after
-    # TERM would otherwise write past STATUS. Escalate to KILL after a ~5 s grace
-    # period. The braces keep bash's job-status notice ("Killed") off stderr.
-    {
-        i=0
-        while kill -0 -- "-$child" 2>/dev/null; do
-            [ $i -ge 50 ] && { kill -KILL -- "-$child" 2>/dev/null; sleep 0.1; break; }
-            sleep 0.1; i=$((i + 1))
-        done
-    } 2>/dev/null
+    ret=$killnum
+elif [ -n "$stray" ] && [ $rc -eq 0 ]; then
+    ret=1
 fi
 trap - TERM INT HUP
 
@@ -129,6 +172,8 @@ if [ -n "$(tail -c1 "$LOG")" ]; then
 fi
 if [ -n "$killed" ]; then
     status="STATUS: FAIL (killed: $killed)"
+elif [ -n "$stray" ]; then
+    status="STATUS: FAIL (stray processes killed)"
 elif [ $rc -eq 0 ]; then
     status="STATUS: OK"
 else
@@ -138,6 +183,7 @@ fi
     echo "$endmark"
     printf '# end: %s\n' "$(utc)"
     [ -n "$killed" ] && printf '# killed: %s\n' "$killed"
+    [ -n "$stray" ] && printf '# stray: killed\n'
     printf '# exit: %s\n' "$rc"
     echo "$status"
 } >> "$LOG"
@@ -146,4 +192,4 @@ echo "log: $LOG"
 echo "lines: $(wc -l < "$LOG")"
 echo "md5: $(md5sum "$LOG" | cut -d' ' -f1)"
 echo "$status"
-exit $rc
+exit $ret

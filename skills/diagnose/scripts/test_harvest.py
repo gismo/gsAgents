@@ -625,6 +625,20 @@ def test_fenced_hash_lines_do_not_truncate_a_deviation_section():
     assert "The rest of the explanation." in parsed.deviations[0]
 
 
+def test_fenced_round_header_and_verdict_are_not_round_boundaries():
+    text = (
+        "# Round 1\n\n"
+        "The implementer's report quotes an earlier review:\n\n"
+        "```\n"
+        "# Round 2\n"
+        "VERDICT: FAIL\n"
+        "```\n\n"
+        "VERDICT: PASS\n"
+    )
+    parsed = harvest.parse_review_text(text)
+    assert parsed.verdict_sequence == ["PASS"]
+
+
 def test_mask_fences_preserves_offsets():
     text = "a\n```\n# x\n```\nb\n"
     masked = harvest.mask_fences(text)

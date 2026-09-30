@@ -61,10 +61,13 @@ What must exist / behave differently when this task is done.
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
 
-Standing rules are never copied into a spec. The `Standing rules:` line names
-`rules.md` and the md5 it had when the spec-writer verified it; `## Standing
-rules check` lists every factual sentence of `rules.md` the task relies on with
-the log of the run that confirmed it. During `/gismo:implement` the orchestrator
+`rules.md` is the only place a standing rule is stated; a spec never restates one
+as its own premise or instruction. The `Standing rules:` line names `rules.md`
+and the md5 it had when the spec-writer verified it. `## Standing rules check` is
+the record of that verification: each factual sentence of `rules.md` the task
+relies on, quoted only to identify the rule that was checked, with the log of the
+run that confirmed it. That quote is never a source for another spec, and the md5
+comparison below is what catches it going stale. During `/gismo:implement` the orchestrator
 owns `rules.md`: before each task-lead or implementer dispatch it compares the
 spec's md5 with the current one, and if they differ the spec's record is stale
 and the orchestrator re-runs that spec's rules check before dispatching. A rule a

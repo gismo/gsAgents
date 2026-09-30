@@ -107,6 +107,42 @@ check "stubborn: logger returns within 7 s (took ${dt}s)" $([ "$dt" -le 7 ]; ech
 check "stubborn: exit code is 143" $([ "$src" -eq 143 ]; echo $?)
 check "stubborn: trailer written, STATUS last" $(grep -qx '# killed: TERM' "$slog" && [ "$(tail -n1 "$slog")" = "STATUS: FAIL (killed: TERM)" ]; echo $?)
 
+# A command that exits while a background descendant is still writing: the logger waits
+# for it within the grace period, so its output lands before STATUS and the md5 is final.
+bout="$(bash "$RL" "$T/bg" bglate sh -c '(sleep 0.3; echo LATE) & exit 0')"; brc=$?
+sleep 0.5
+blog="$(ls "$T"/bg/logs/*-bglate.log)"
+check "bglate: exit code is 0" $([ "$brc" -eq 0 ]; echo $?)
+check "bglate: late output kept before STATUS" $(grep -qx LATE "$blog" && [ "$(tail -n1 "$blog")" = "STATUS: OK" ]; echo $?)
+check "bglate: printed md5 equals md5sum" $([ "$(echo "$bout" | sed -n 's/^md5: //p')" = "$(md5sum "$blog" | cut -d' ' -f1)" ]; echo $?)
+
+# A descendant still running after the grace period is killed and the run fails; this one
+# ignores TERM, so it takes the KILL stage too.
+t0=$SECONDS
+sout="$(bash "$RL" "$T/bg" bgstray sh -c '(trap "" TERM; sleep 37; echo NEVER) & exit 0')"; strc=$?
+dt=$((SECONDS - t0))
+stlog="$(ls "$T"/bg/logs/*-bgstray.log)"
+check "bgstray: logger returns within 14 s (took ${dt}s)" $([ "$dt" -le 14 ]; echo $?)
+check "bgstray: no survivor left running" $(! pgrep -f 'sleep 37' >/dev/null; echo $?)
+check "bgstray: exit code is 1" $([ "$strc" -eq 1 ]; echo $?)
+check "bgstray: trailer records the command's exit and the strays" $(grep -qx '# exit: 0' "$stlog" && grep -qx '# stray: killed' "$stlog"; echo $?)
+check "bgstray: STATUS last" $([ "$(tail -n1 "$stlog")" = "STATUS: FAIL (stray processes killed)" ]; echo $?)
+check "bgstray: printed md5 equals md5sum" $([ "$(echo "$sout" | sed -n 's/^md5: //p')" = "$(md5sum "$stlog" | cut -d' ' -f1)" ]; echo $?)
+check "bgstray: descendant output absent" $(! grep -qx NEVER "$stlog"; echo $?)
+
+# The logger signalled while draining a command that has already exited: the trailer keeps
+# the command's own exit code, and the logger still exits 128+15.
+set -m
+bash "$RL" "$T/bg" draintm sh -c '(sleep 3) & exit 7' >/dev/null 2>&1 &
+dpid=$!
+set +m
+sleep 1
+kill -TERM "$dpid"; wait "$dpid"; drc=$?
+dlog="$(ls "$T"/bg/logs/*-draintm.log)"
+check "draintm: exit code is 143" $([ "$drc" -eq 143 ]; echo $?)
+check "draintm: trailer keeps the command's exit 7" $(grep -qx '# exit: 7' "$dlog" && grep -qx '# killed: TERM' "$dlog"; echo $?)
+check "draintm: STATUS last" $([ "$(tail -n1 "$dlog")" = "STATUS: FAIL (killed: TERM)" ]; echo $?)
+
 env SHELLOPTS=errexit bash "$RL" "$T/task" errexit false >/dev/null; erc=$?
 elog="$(ls "$T"/task/logs/*-errexit.log)"
 check "errexit: exit code propagates (1)" $([ "$erc" -eq 1 ]; echo $?)

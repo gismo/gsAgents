@@ -3,7 +3,7 @@
 **Date:** 2026-08-29 · **Branch:** `agent-tuning-quick-mode-and-comments`
 **Status:** findings verified, then adversarially re-checked (§6); 7 fixes applied; batching (§3 items 3–7, 9) deferred pending measurement.
 
-Update 2026-09-29 (0.8.0): the A1–A5 fixes are committed, and the proposal in `PROPOSAL-evidence-and-review-rules.md` (R2, R3, R4, R7) has since landed in 0.8.0. `skills/diagnose/scripts/test_harvest.py` now runs 32 tests, not the 30 stated here.
+Update 2026-09-29 (0.8.0): the A1–A5 fixes are committed, and the proposal in `PROPOSAL-evidence-and-review-rules.md` (R2, R3, R4, R7) has since landed in 0.8.0. `skills/diagnose/scripts/test_harvest.py` now runs 41 tests, not the 30 stated here.
 
 This document is written to be read cold, by a reviewer who was not present for
 the analysis. Every number below is measured, and the method that produced it is
