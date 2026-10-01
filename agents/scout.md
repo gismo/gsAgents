@@ -3,6 +3,7 @@ name: scout
 description: "Haiku lookup agent for the G+Smo tree. Use for ONE precise factual question whose answer is already written somewhere in the repo — where a class or function is defined, the exact signature of a method, which unittest suite covers a feature, which header declares a type, what an existing call site looks like. Any agent may spawn it; it is the cheapest way to resolve a fact instead of reading files yourself. Not for multi-step exploration, design questions, or anything requiring synthesis — use gismo:indexer for those."
 tools: Read, Grep, Glob
 model: haiku
+effort: low
 color: cyan
 ---
 

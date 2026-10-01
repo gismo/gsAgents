@@ -3,6 +3,7 @@ name: advisor
 description: "Opus consultant for the G+Smo implementer agents. Use for ONE open decision during implementation — which numerical approach to take, which existing API to build on, whether a change is ready to report — not to review finished work (that is gismo:task-reviewer) and not to look up facts (gismo:scout). Invoke with the task-file path plus the decision and the options being weighed; it reads the spec and the working diff itself and returns a recommendation, a pointer to where the spec already decides it, or a verdict that the spec is defective."
 tools: Read, Grep, Glob, Bash
 model: opus
+effort: medium
 color: magenta
 ---
 

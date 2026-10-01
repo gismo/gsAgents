@@ -79,7 +79,10 @@ Two more traps the corpus sets:
 
 - **Review files accumulate repair rounds in one file.** A file can hold both a round-1
   `FAIL` and a round-2 `PASS`. Per-file verdict counts are wrong; the script emits verdict
-  *sequences*, and the FAIL→PASS round count is the interesting statistic.
+  *sequences*, and the FAIL→PASS round count is the interesting statistic. A third
+  verdict, `PASS (FIX-UPS)`, marks a text-only correction pass over a sound artifact: it
+  cost no repair round, so read `FAIL → PASS (FIX-UPS)` as one repair round (the FAIL) and
+  a lone `PASS (FIX-UPS)` as zero — never fold it into `PASS` or into `FAIL`.
 - **Frequency is not severity.** A defect appearing 200 times in doc tasks matters less
   than one appearing 5 times in numerics. Weight by blast radius, and say which you used.
 

@@ -32,6 +32,12 @@ names the cause of any mismatch. Three outcomes matter:
   such a row is doing work a gismo agent should have done, the plugin
   installed in this checkout is probably older than the agent being called.
 
+Effort is recorded too: every entry in a subagent's `.jsonl` carries a top-level
+`"effort"` field (`low`, `medium`, `high`, `xhigh`, `max`), absent for tiers that
+have no effort setting. Read what an agent ran at with
+`grep -o '"effort":"[a-z]*"' <session>/subagents/agent-<id>.jsonl | sort | uniq -c`,
+and compare it to the `effort:` line in the agent's definition.
+
 Transcripts are per-machine: this audits runs that happened where you are
 running it, not runs from another machine or a cloud session.
 

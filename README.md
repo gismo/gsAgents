@@ -20,7 +20,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:implementer` | sonnet | Library code in `src/`, `optional/*/src` |
 | `gismo:test-writer` | sonnet | UnitTest++ suites |
 | `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
-| `gismo:task-reviewer` | opus | Adversarial per-task PASS/FAIL gate (attacks the change; no routine test re-runs) |
+| `gismo:task-reviewer` | opus | Adversarial per-task gate: PASS / PASS (fix-ups) / FAIL (attacks the change; no routine test re-runs) |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
 | `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
@@ -35,7 +35,11 @@ The per-task closed loop runs as **nested subagents** (requires Claude Code
 >= 2.1.172): `/gismo:implement` dispatches one `gismo:task-lead` per task,
 which spawns the task's implementer and then `gismo:task-reviewer`, re-dispatching
 the implementer with the review file on `VERDICT: FAIL` — up to 2 repair rounds —
-before returning a single `CYCLE: PASS/FAIL/BLOCKED` verdict. The round-by-round
+before returning a single `CYCLE: PASS / PASS (fix-ups applied) / PASS (review deferred) / FAIL / BLOCKED` verdict. A review whose only
+blocking findings are textual (a report claim the diff does not support, a stale
+comment) returns the third verdict, `VERDICT: PASS (fix-ups)`: the correction is
+applied once, with no second review and no repair round, because a wrong sentence
+over correct code should not cost what a wrong tolerance costs. The round-by-round
 reports and reviews stay out of the main session's context; the files under
 `.claude/plans/<slug>/tasks/` remain the audit trail.
 
@@ -48,11 +52,12 @@ verdict as a `Mode:` line in `plan.md` (`--quick` / `--full` overrides it).
 
 - **quick** — the orchestrator writes the task file itself when the plan is already
   grounded, dispatches the implementer directly, runs one `gismo:task-reviewer` and at
-  most one repair round. No spec-writer wave, no task-lead, no batch review, no
-  `summary.md`.
+  most one repair round. No spec-writer wave, no task-lead, no `summary.md`;
+  `light`/`none` tasks still get the one-reviewer batch review at final
+  verification.
 - **standard** — the full machinery below.
 
-`Review: full|light|none` still scales the *review* within a run; `Mode:` scales the
+`Review: full|measurement|light|none` still scales the *review* within a run; `Mode:` scales the
 *machinery around it*. They are independent dials.
 
 ### Grounding once instead of N times
@@ -65,6 +70,60 @@ facts more than one task needs, written to `.claude/plans/<slug>/context.md` wit
 their own task, and return `New facts:` in their report. They are dispatched in **waves
 of ~4**; between waves the orchestrator — the ledger's single writer, so no append race —
 folds the new facts in, and the next wave starts warmer.
+
+### Evidence by reference, standing rules, append-only plans
+
+A report that retypes command output can carry a number that is plausible and
+wrong, so every command whose output a report quotes runs through
+`/gismo:evidence-log` (`run_logged.sh`): it keeps a verbatim, numbered log under
+`.claude/plans/<slug>/tasks/logs/` (command, UTC start and end, interleaved
+stdout and stderr, exit code, and a final `STATUS:` line) and prints the log's path, line count and md5. A
+report cites `logs/NNN-<slug>.log:L1-L2 (md5 <hash>)` and fences are copies of
+those lines, nothing retyped; the reviewer diffs each fence against its log. A
+check that failed to start is logged too but is not evidence.
+
+Facts that hold for the whole plan live once, in `.claude/plans/<slug>/rules.md`:
+**standing rules**, each factual sentence paired with the command that verifies
+it. A task spec never copies them; it names `rules.md` and the md5 the
+spec-writer verified it at, and its `## Standing rules check` cites the logged
+run that confirmed each rule the task relies on. (These are unrelated to the
+*Session rules* section at the top of `/gismo:plan` and `/gismo:implement`, which
+govern how the orchestrator behaves in that session, not what is true of the
+code.) `plan.md`, `rules.md` and specs are **append-only for premises and
+status**: a correction is a dated `Update YYYY-MM-DD (reason): …` paragraph under
+the original, so what was believed, and when it stopped being believed, survives;
+instruction lines (`Review:`, `Files`, acceptance criteria) are still corrected
+in place. The reviewer appends a `## Round N` section per repair round rather
+than overwriting, and `dispatches.log` records every implementer pass (`impl`,
+`repair`, `fixup`, `evidence`), every review and every review verdict with a UTC
+timestamp; spec-writers, scouts and advisor consults are not logged.
+
+### Adjacent sessions and native task tracking
+
+Before dispatching anything, `/gismo:implement` calls `ListAgents` (Claude Code
+>= 2.1.224) to see whether another local session is working in the same
+worktree or on the same plan, and asks how the two relate. A session is matched
+by working directory or by name, so name sessions after the plan:
+`claude --name <slug>` (or `/rename <slug>`).
+
+The run's progress is also mirrored into Claude Code's native task list, one task
+per task file (subject = the file's basename, dependencies from the
+decomposition), with `completed` meaning *reviewed*: the implementer marks its
+task `in_progress` and the orchestrator marks it `completed` when the cycle
+passes. A task whose review was deferred (`Review: light`/`none`) stays
+`in_progress` until the end-of-run batch review passes it. This is optional and never load-bearing — the task files remain the
+record. The Task tools are off by default on current models; to enable them add
+to `~/.claude/settings.json` (a plugin cannot set it, and it takes effect in new
+sessions only, since subagents get the tools only if it was set at session start):
+
+```json
+{ "env": { "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1" } }
+```
+
+Without it the framework says so once and runs with the task files alone. For
+multi-session work on one plan, `CLAUDE_CODE_TASK_LIST_ID=<slug>` stores the
+list in `~/.claude/tasks/<slug>/`, and every session started with the same ID
+shares it.
 
 ### Comments that survive the commit
 
@@ -92,6 +151,11 @@ message those two — and only those two — while they run; spec-writer,
 the implementers, the reviewer, doc-writer and debugger may spawn scout and
 indexer; the three implementers may additionally spawn `gismo:advisor` (opus,
 capped at 2 per task); scout, indexer and advisor spawn nothing.
+
+Each agent also pins an `effort:` tier in its frontmatter, the reasoning-effort
+counterpart of `model:`: `high` for `gismo:task-reviewer`; `low` for the
+mechanical `gismo:builder`, `gismo:unittest-runner` and `gismo:scout`; `medium`
+for every other agent.
 
 ### Verifying the tiers actually held
 
@@ -127,7 +191,10 @@ prompt, silently reverting the sonnet/opus split for a whole run.
 
 The ceremony also scales with risk: each task spec carries a `Review:` level,
 fixed by the orchestrator at decomposition time. `full` tasks get the
-in-cycle adversarial review; `light`/`none` tasks defer their review into
+in-cycle adversarial review. `measurement` tasks — a data file plus an analysis
+script — are also reviewed in-cycle, but there is nothing to attack in a CSV, so
+the reviewer re-derives the headline numbers and diffs every fence in the report
+against its log instead. `light`/`none` tasks defer their review into
 ONE end-of-run batch pass (diff-vs-spec read for `light`, evidence sanity
 for `none`, plus a cross-task consistency look the per-task reviews can't
 give) — so trivial tasks are cheap, nothing ships unreviewed, and a task
@@ -153,9 +220,9 @@ project and user settings files and surfaces the answer to every agent as
 | `native` | Claude Code's own advisor, inherited by every subagent | `advisorModel` is set — including via `/advisor` |
 
 So `/advisor opus` and `/advisor off` take effect on the next agent run with no
-config edit. This used to be a value you set by hand, which was a mistake: the
-moment it said `agent` while an advisor was in fact configured, every
-implementer got advised twice — precisely what the switch exists to prevent.
+config edit. The value is detected rather than set by hand because a hand-set
+`agent` while an advisor is in fact configured would advise every implementer
+twice — precisely what the switch exists to prevent.
 The `advisor` key in `.claude/gismo-dev.local.json` survives for the one
 undetectable case, `claude --advisor <model>`, which touches no file; it can
 only escalate to `native`, never talk the detector out of one it found.
@@ -249,6 +316,7 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 |---|---|
 | `/gismo:plan` | Triage (quick/standard) + planning conventions → `plan.md` (+ decomposition) |
 | `/gismo:implement` | Closed-loop orchestration of an approved plan, in either mode |
+| `/gismo:evidence-log` | Run a command through a verbatim numbered logger; reports cite log path and line range |
 | `/gismo:tidy` | Strip change-narration comments from the diff before committing |
 | `/gismo:dev-config` | Set build dir + parallel-jobs cap |
 | `/gismo:build-target` | Guarded `make <target>` — the only sanctioned build |

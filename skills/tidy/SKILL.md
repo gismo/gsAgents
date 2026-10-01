@@ -1,6 +1,6 @@
 ---
 name: tidy
-description: Strip change-narration comments from the working diff before it is committed — the "I removed this because…", "previously we used…", "NOTE: added for task 3" scaffolding that agents write while implementing. Keeps genuine code comments (doxygen, theory links, complexity notes, non-obvious rationale). Use at the end of a /gismo:implement run, or standalone on any dirty G+Smo tree before committing.
+description: 'Strip change-narration comments from the working diff before it is committed — the "I removed this because…", "previously we used…", "NOTE: added for task 3" scaffolding that agents write while implementing. Keeps genuine code comments (doxygen, theory links, complexity notes, non-obvious rationale). Use at the end of a /gismo:implement run, or standalone on any dirty G+Smo tree before committing.'
 argument-hint: "[path or git-ref, default: the working diff]"
 allowed-tools: Read, Edit, Grep, Glob, Bash, Agent
 ---
