@@ -61,7 +61,10 @@ What must exist / behave differently when this task is done.
 - [ ] Checkable statements only (compiles, test X passes, output Y appears...)
 ```
 
-`rules.md` is the only place a standing rule is stated; a spec never restates one
+The rules that hold in every plan (tool use, git, builds, denied commands, assertions, comments) are
+in `${CLAUDE_PLUGIN_ROOT}/skills/implement/STANDING_RULES.md`, which every agent in a run reads
+alongside this contract; neither `rules.md` nor a spec re-types them. `rules.md` is the only place a
+plan-specific standing rule is stated; a spec never restates one
 as its own premise or instruction. The `Standing rules:` line names `rules.md`
 and the md5 it had when the spec-writer verified it. `## Standing rules check` is
 the record of that verification: each factual sentence of `rules.md` the task
@@ -263,7 +266,8 @@ that task's native task ID. The task-lead holds no Task tools: it forwards the I
 and never changes a native task's status.
 It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
 
-1. Read the task file's `Agent:` and `Review:` lines — nothing else. No
+1. Read the task file's `Agent:` and `Review:` lines and the paths under its
+   `## Files` heading (for the lint gate, step 2b) — nothing else. No
    plan.md, no source, no context files: the implementer reads them itself.
 2. Dispatch that agent with the task-file path, plus the native task ID if you
    were given one — forward it verbatim rather than searching for a match
@@ -300,6 +304,19 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    evidence>` in place of a review file; the first implementer pass is repair
    round 1, logged `repair` at `round: 1`, and a per-task review follows as in
    any `full` cycle.
+
+   2b. **Lint gate.** After the first pass returns `RESULT: DONE` and before the reviewer is
+   dispatched (or, on `light`/`none`, before the report is accepted), run
+   `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh <the task's ## Files paths>`.
+   It is deterministic and read-only. `STATUS: OK` → carry on. `STATUS: FINDINGS` → send the
+   implementer back (`SendMessage`, or a fresh dispatch of the same type) with the lint output
+   pasted in the message, `round: 0`, and the instruction to fix every `major` and `minor` finding, re-run
+   `review_lint.sh`, update the report and end with its completion line. The bounce is a **lint
+   pass** (implementer protocol, step 9): no repair round is spent, it happens at most once per
+   task, and no reviewer follows it directly — the cycle goes on to the reviewer as usual. If
+   findings remain after the lint pass, dispatch the reviewer anyway and put the remaining lint
+   output in its prompt so it need not rediscover them. A `STATUS: FAIL` from the script (not a finding, a tool error) is
+   noted in the return message and does not block the cycle.
 3. `VERDICT: FAIL` → put the implementer back on the task with task-file +
    review-file paths — `SendMessage` to the agent it already spawned, whose
    context is warm (it already has the native task ID from round 0, no need
@@ -334,7 +351,7 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    `BLOCKED` caused by an agent that returned twice without its completion line
    states the reason `no result after re-nudge`, distinct from a spec defect.
    The task-lead edits no files and its
-   Bash is read-only inspection (`git diff`, reading a report) — never a build
+   Bash is read-only inspection (`git diff`, reading a report, `review_lint.sh`) — never a build
    or a test run; spec repair and escalation belong to the orchestrator. Its
    `SendMessage` reaches only the two agents that cycle spawned itself, never
    the orchestrator or a sibling lead.
@@ -352,20 +369,21 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    the first pass, `N` for repair round N; if none was passed, log `?` and
    continue — a missing round degrades the log and never blocks; kind `impl` for the first pass, `repair` when the
    prompt carries a `FAIL` review for round N, `fixup` when it carries a
-   `PASS (fix-ups)` review, `evidence` for an evidence-completion pass (a prompt that carries a batch review's `FAIL`, from before the cycle began, is logged as `repair` at round 1, and its report section is `## Round 1`) — fix-up
-   and evidence passes keep the round of the cycle they belong to and are not
+   `PASS (fix-ups)` review, `lint` for a lint pass (the prompt carries `review_lint.sh` output), `evidence` for an evidence-completion pass (a prompt that carries a batch review's `FAIL`, from before the cycle began, is logged as `repair` at round 1, and its report section is `## Round 1`) — fix-up,
+   lint and evidence passes keep the round of the cycle they belong to and are not
    repair rounds) to `dispatches.log` beside your task file's
    `tasks/` directory (`.claude/plans/<slug>/dispatches.log`). Your dispatcher
    cannot write files; this log is the only record of how many implementer
    and reviewer passes a run spent (scouts, advisor consults and spec-writers
    are not logged). Lines written before the `kind` column existed have four
    fields; treat a missing fifth field as unknown. Write the line again each
-   time a message brings you back in (a `repair`, `fixup` or `evidence` line
+   time a message brings you back in (a `repair`, `fixup`, `lint` or `evidence` line
    for that round): a warm agent that receives fixes by `SendMessage` is not
    re-dispatched, so nothing else records the pass. The reviewer's `verdict`
    lines (see the reviewer protocol) carry a sixth field, the verdict string;
    a reader that only knows five fields ignores it.
-2. Read YOUR task file only, plus the context it points to. Never read plan.md.
+2. Read YOUR task file only, plus the context it points to and
+   `${CLAUDE_PLUGIN_ROOT}/skills/implement/STANDING_RULES.md`. Never read plan.md.
    For small factual gaps (a location, a signature, a convention) spawn
    `gismo:scout` (haiku) — one question per scout, so several facts mean
    several scouts dispatched in the same message, never several questions in
@@ -415,8 +433,12 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    Never settle an open judgment call by guessing.
 4. Verify, in order:
    a. `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <every touched file>`
-   b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
-   c. the task's test command
+   b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh <every touched file>` — the
+      conventions in `${CLAUDE_PLUGIN_ROOT}/skills/review/CONVENTIONS.md` that a script can decide.
+      Fix every `major` and `minor` finding before going on (it only reports lines your diff added
+      or changed), then re-run until `STATUS: OK`. A `note` line does not block and is yours to judge: act on it only when it is a real defect under the rulebook (a `std::move` of a standard-library value, or a capitalised acronym, is not). It is cheap, and a finding left for the reviewer costs a repair round.
+   c. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
+   d. the task's test command
 
    Run every command whose output the report will cite through
    `bash ${CLAUDE_PLUGIN_ROOT}/skills/evidence-log/scripts/run_logged.sh <task-dir> <slug> <command…>`
@@ -502,6 +524,15 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    (`CYCLE: FAIL (evidence)`). The pass costs no repair round. End your
    returned final message with that same completion line.
 
+9. **Lint pass.** You may be sent back with `review_lint.sh` output the task-lead
+   ran over your files. Log the dispatch with kind `lint`, fix every `major` and `minor` finding
+   (editing only the lines it names, within your task's files), re-run
+   `review_lint.sh` through `run_logged.sh`, append a `## Round N (lint)` section
+   to the report citing that log, and end it with `RESULT: DONE` (or
+   `RESULT: BLOCKED` if a finding cannot be fixed within the spec). Re-run
+   `syntax_check.sh` on every source file you edited. The pass costs no repair
+   round. End your returned final message with the same completion line.
+
 ## Comment discipline (all implementer agents)
 
 **The report is the place for reasoning about the change; the source is the
@@ -519,6 +550,11 @@ Never write into the source:
 - restatements of what the code plainly says, or first-person hedging ("this
   should work", "I chose this because");
 - commented-out code you replaced. It is in git.
+
+`review_lint.sh` flags the mechanical forms of these (`CM-NARR`, `CM-LINEREF`, `CM-DEAD`,
+`CM-EMPH`; list and exact patterns in `${CLAUDE_PLUGIN_ROOT}/skills/review/CONVENTIONS.md`). A
+clean lint run is not a pass: a regex does not see a narrating sentence phrased in words it does not
+list, and the test below still decides.
 
 Do write, as always:
 
@@ -636,8 +672,10 @@ each, plus cross-task consistency notes). Both follow:
    5. On test tasks, **falsification evidence** (each new test observed to
       FAIL once, per the test-writer's protocol) present in the report.
    6. No out-of-scope files touched, no scope creep.
-   7. **G+Smo conventions** (`give()` not `std::move`, GISMO_EXPORT/.cpp for
-      non-template free functions, h/hpp/_.cpp split) and comment discipline.
+   7. **G+Smo conventions** (the rulebook is
+      `${CLAUDE_PLUGIN_ROOT}/skills/review/CONVENTIONS.md`: `give()` not `std::move`,
+      GISMO_EXPORT/.cpp for non-template free functions, h/hpp/_.cpp split) and comment
+      discipline. The scriptable rules were already linted in the implementer's run.
       Real, but rare: 2 of 77 corpus fixes. Do not spend the pass here, and
       do not let a clean convention sweep stand in for check 1.
 

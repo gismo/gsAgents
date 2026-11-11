@@ -43,6 +43,18 @@ Read `summary.md` and `recurrence.json` yourself — they are small, and `recurr
 is the answer to the actual question ("what did agents *keep* getting wrong"), already
 computed. Do not read the slices; they are the miners' input, not yours.
 
+It also reads the output of `/gismo:review`, laid out as `.claude/plans/<slug>/review/<timestamp>/`:
+the per-agent `findings/*.md` (block format defined in `${CLAUDE_PLUGIN_ROOT}/agents/style-checker.md` and
+`${CLAUDE_PLUGIN_ROOT}/agents/task-reviewer.md`) and the script-decided lint findings in `input/lint.tsv`
+(harvested as `MEASURED`, so the most frequent rules are included). `review.md` only supplies the
+run's headline; its blocks restate the others and are never counted as findings. The
+`## Review RULE-IDs by recurrence` table in `summary.md` ranks the RULE-IDs of
+`${CLAUDE_PLUGIN_ROOT}/skills/review/CONVENTIONS.md` by distinct review runs, then finding count and
+worst severity. A RULE-ID that keeps recurring across reviews indicts the rule's wording in
+`CONVENTIONS.md` (unclear or too weak), the lint check behind it, or the agent file that should have
+prevented it. Findings without a RULE-ID are keyed `norule:<slug>` in `recurrence.json` and are not
+ranked in that table: they are candidates for a new rule.
+
 ## 2. Fan out — cheap models only
 
 Dispatch one miner per slice, **all in a single message**, each on **haiku**.

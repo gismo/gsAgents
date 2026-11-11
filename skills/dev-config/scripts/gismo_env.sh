@@ -4,7 +4,8 @@
 # Source it from other scripts:   source "$(dirname "$0")/../../dev-config/scripts/gismo_env.sh"
 # Or run it directly to inspect:  ./gismo_env.sh
 #
-# Exports: GISMO_ROOT, GISMO_BUILD_DIR, GISMO_JOBS
+# Exports: GISMO_ROOT, GISMO_BUILD_DIR, GISMO_JOBS, GISMO_ADVISOR,
+#          GISMO_BUILD_TYPE, GISMO_NDEBUG (1 | 0 | unknown)
 #
 # Resolution order:
 #   1. Pre-set environment variables win.
@@ -115,7 +116,51 @@ gismo_env() {
     fi
     case "$GISMO_ADVISOR" in agent|native) ;; *) GISMO_ADVISOR=agent ;; esac
     export GISMO_ADVISOR
+
+    # --- build type and whether assertions are live ---
+    #   GISMO_BUILD_TYPE  CMAKE_BUILD_TYPE of the build dir, or `unknown`
+    #   GISMO_NDEBUG      1 = -DNDEBUG is in effect (GISMO_ASSERT and assert() compiled out)
+    #                     0 = assertions live
+    #                     unknown = neither the cache nor compile_commands.json decides it
+    #
+    # The flags decide, not the build-type name: G+Smo's RelWithDebInfo carries no
+    # -DNDEBUG (CMAKE_CXX_FLAGS_RELWITHDEBINFO is `-O2 -g`), so assertions stay live
+    # there although the type looks like a release. Order of evidence:
+    #   1. CMakeCache.txt: -DNDEBUG in CMAKE_CXX_FLAGS or CMAKE_CXX_FLAGS_<TYPE>.
+    #   2. compile_commands.json: any -DNDEBUG among the real compile commands.
+    # 1 if either source carries it; 0 if a flag source exists (a non-empty
+    # CMAKE_BUILD_TYPE, or compile_commands.json) and none does; unknown otherwise.
+    # A pre-set GISMO_BUILD_TYPE / GISMO_NDEBUG wins, like the other variables.
+    if [ -z "${GISMO_BUILD_TYPE:-}" ] || [ -z "${GISMO_NDEBUG:-}" ]; then
+        local cache="$GISMO_BUILD_DIR/CMakeCache.txt" btype="" flags="" tflags="" nd="unknown"
+        btype="$(_gismo_cache_get CMAKE_BUILD_TYPE "$cache")"
+        flags="$(_gismo_cache_get CMAKE_CXX_FLAGS "$cache")"
+        if [ -n "$btype" ]; then
+            tflags="$(_gismo_cache_get "CMAKE_CXX_FLAGS_$(printf '%s' "$btype" | tr '[:lower:]' '[:upper:]')" "$cache")"
+        fi
+        # -DNDEBUG may also come from add_definitions() and appear only in the compile
+        # commands, so the cache alone settles the answer only when it says 1.
+        [ -n "$btype" ] && nd=0
+        case "$flags $tflags" in *-DNDEBUG*) nd=1 ;; esac
+        if [ "$nd" != 1 ] && [ -s "$GISMO_BUILD_DIR/compile_commands.json" ]; then
+            if grep -q -m1 -e '-DNDEBUG' "$GISMO_BUILD_DIR/compile_commands.json" 2>/dev/null; then nd=1; else nd=0; fi
+        fi
+        [ -z "${GISMO_BUILD_TYPE:-}" ] && GISMO_BUILD_TYPE="${btype:-unknown}"
+        [ -z "${GISMO_NDEBUG:-}" ] && GISMO_NDEBUG="$nd"
+    fi
+    case "$GISMO_NDEBUG" in 0|1|unknown) ;; *) GISMO_NDEBUG=unknown ;; esac
+    export GISMO_BUILD_TYPE GISMO_NDEBUG
     return 0
+}
+
+# Value of a CMake cache entry (any type), empty if absent. Entries look like
+# `KEY:TYPE=value`; the value may itself contain `=` and surrounding quotes.
+_gismo_cache_get() {
+    local v
+    v="$(grep -m1 "^$1:[A-Z]*=" "$2" 2>/dev/null)" || return 0
+    v="${v#*=}"
+    v="${v#\'}"; v="${v%\'}"
+    printf '%s' "$v"
 }
 
 # When executed (not sourced), print the resolved environment.
@@ -126,6 +171,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     echo "GISMO_BUILD_DIR=$GISMO_BUILD_DIR"
     echo "GISMO_JOBS=$GISMO_JOBS"
     echo "GISMO_ADVISOR=$GISMO_ADVISOR"
+    echo "GISMO_BUILD_TYPE=$GISMO_BUILD_TYPE"
+    echo "GISMO_NDEBUG=$GISMO_NDEBUG"
     grep -m1 '^CMAKE_BUILD_TYPE:' "$GISMO_BUILD_DIR/CMakeCache.txt" 2>/dev/null || true
     echo "STATUS: OK"
 fi

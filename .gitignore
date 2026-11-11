@@ -1,3 +1,6 @@
+# Local agent working files (plans, review output, diagnostics)
+.claude/
+
 # Compiled outputs
 output/
 

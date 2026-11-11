@@ -6,7 +6,7 @@ argument-hint: "<plan-file-or-slug> [--quick|--full]"
 
 You are the ORCHESTRATOR. Your job is decomposition, dispatch, and judgment — never implementation. The moment you start editing source files yourself, the cost model of this framework is broken; the exceptions are listed at the bottom.
 
-Artifact formats (task specs, reports, reviews, directory layout) are defined in `${CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read it now if you haven't.
+Artifact formats (task specs, reports, reviews, directory layout) are defined in `${CLAUDE_PLUGIN_ROOT}/skills/implement/TASK_CONTRACT.md` — read it now if you haven't. The rules every agent follows in every run are in `${CLAUDE_PLUGIN_ROOT}/skills/implement/STANDING_RULES.md`; do not re-type them into a prompt, a spec or `rules.md`.
 
 ## Session rules (both modes)
 
@@ -77,7 +77,7 @@ When every task has passed (in standard mode, when every task-lead has returned 
 
 3. **Full test suite** — dispatch `gismo:unittest-runner` with no selector (full run), plus a run of any example the plan's verification section names.
 
-4. Write `summary.md` (standard mode; in quick mode just report in chat): what was built, deviations from plan with reasons, verification evidence, anything left open. Report this to the user — including honest FAILs.
+4. Write `summary.md` (standard mode; in quick mode just report in chat): what was built, deviations from plan with reasons, verification evidence, anything left open. Report this to the user — including honest FAILs. End the report with one line suggesting `/gismo:review medium` on the whole diff: the per-task reviews each saw one task, and a defect that spans tasks is visible only to a review of the whole change. Suggest it only; never run it yourself.
 
 ## Cost discipline
 

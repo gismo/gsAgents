@@ -94,6 +94,8 @@ it to choose its path. Then: **Context** (why; problem; intended outcome) → **
 
 A verify command exits nonzero when its rule is false, so its exit code is the verdict. A pipe or a compound goes inside `bash -c '…'`, which is how the spec-writer passes it to `run_logged.sh`. A verify command only reads: it never builds, configures or modifies anything.
 
+`rules.md` holds facts specific to this plan. The rules that hold in every plan — no shell duplication of files, no git writes, builds and tests only through the scripts, a denied command is reported and not replaced, assertions read from `GISMO_NDEBUG`, comments explain the code and never the change — are in `${CLAUDE_PLUGIN_ROOT}/skills/implement/STANDING_RULES.md` and are not copied into `rules.md`.
+
 A rule you cannot attach a command to is a judgment, not a fact: state it as a decision, not as something that "is" so. Specs reference `rules.md` by md5 and never copy it (contract, task spec format); like `plan.md`, its statements are corrected by appended dated updates, not rewritten. This is different from `context.md`, the per-run fact ledger, which the orchestrator alone writes.
 
 Ground the plan in reality first:

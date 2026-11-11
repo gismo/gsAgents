@@ -136,6 +136,9 @@ When presenting indexing results, use this structure:
 [Concise guidance on where to start for the user's stated goal]
 ```
 
+## Evidence labels
+Every claim in the index carries a label: `MEASURED` (a command was run and its output seen, e.g. a `grep` or `ls` hit), `REASONED` (derived from reading a header or file head), or `UNVERIFIED` (not checked against the file, including anything taken from a generated map without opening the file — maps can be stale). The caller decides what to build on from the label, so write `UNVERIFIED` rather than a flat statement you did not check.
+
 ## Self-Verification Checklist
 Before delivering results:
 - [ ] Did I skip `.hpp` and `_.cpp` files unless explicitly needed?
