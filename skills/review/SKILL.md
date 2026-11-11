@@ -28,6 +28,10 @@ This skill has three jobs, chosen by the first argument:
 
 **Target.** Nothing: the working diff, including untracked files. A git ref: everything since the merge base with it. `pr <N>`: resolve the PR's base and head with `gh pr view <N> --json baseRefName,headRefName`; the head must be the branch that is checked out — if it is not, stop and say which branch to check out, never check it out yourself. One or more paths: restrict the diff to them.
 
+When the target is open — the working diff holds untracked files that are evidently not part of the change (scratch drivers, plans, build output), or the branch has an open pull request and the tree also carries uncommitted edits — ask once what to review, offering the pull request or branch diff, the uncommitted edits, or both, and pass the chosen files to the scripts as paths. Every changed file left out is named on the report's `Excluded` line, so that a reader does not take the review to cover it.
+
+The request may carry a question of the user's own ("is this edit worth including?"). It does not change what the reviewers are given. Answer it in the report's `## Your question` section, from the findings.
+
 **Flags.**
 - `--build` at light or medium adds step 3 (build, filtered tests, example runs) and nothing else: no extra reviewer.
 - `--no-build` at large or ultra drops every step that needs a binary; reviewers are dispatched with `run: no` and what they could not execute is reported `REASONED`.
@@ -41,7 +45,7 @@ Everything a review produces lives in one directory:
 ```
 <gismo-root>/.claude/plans/<slug>/review/<YYYYMMDD-HHMM>/
   review.md        the report
-  decisions.md     written by the resolve step
+  decisions.md     written by the resolve step, as are fix-plan.md, handover-R<n>-*.md and comment-R<n>.md
   input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5
   findings/        one file per reviewer
   debate/          topics.md and one file per position
@@ -58,11 +62,13 @@ bash $S/review_lint.sh [--base <ref>] [--linters] [<path>…]   > D/input/lint.t
 git diff [<merge base>] | md5sum                               > D/input/diff.md5
 ```
 
+Redirect stdout only, exactly as written. The scripts print notices on stderr — for instance that `--base` does not apply to a nested repository — and `2>&1` would put them inside the TSV. An input file that came out wrong is regenerated, never edited.
+
 The scope script also sees changes inside `optional/` modules that are their own git repositories, which a plain `git diff` at the root does not. If the scope is empty, say so and stop. If it holds more than about 60 files, tell the user the count and ask whether to narrow it before spending anything: a review that large is usually a mistaken target.
 
 `review_lint.sh` ends with `STATUS: OK` when it has no major or minor finding; notes may still be listed above it.
 
-Then run `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <changed C++ files>` and keep its output as `D/input/syntax.txt`. A file that does not compile is a `blocker`, and there is no point reviewing the rest at depth until it does: write the report with that one finding and stop.
+Then run `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <changed C++ files>`, leaving out files whose status in `scope.tsv` is `D`, and keep its output as `D/input/syntax.txt`. A file that does not compile is a `blocker` when the file is new or an error sits on a line listed in `lines.tsv`, and there is no point reviewing the rest at depth until it does: write the report with that one finding and stop. A failure whose errors all sit on lines the change did not touch was there before the change: it is not a finding. Record it under **Build and test** and **Not checked**, with the lines, and go on. A header the script reports as OK but not self-contained, and a file it reports as `SKIP` for want of compile flags (the run then ends `STATUS: INCOMPLETE`), are likewise recorded under **Not checked** and do not stop the review.
 
 ## 2. Dispatch reviewers
 
@@ -77,6 +83,11 @@ Dispatch the agents of a step in one message so they run concurrently. Each is g
 | large, ultra | `gismo:task-reviewer` | diff mode, `focus: tests-docs` | `findings/tests-docs.md` |
 
 Every reviewer dispatch also states `run: yes` or `run: no`. When step 3 applies, do it first so the reviewers go out with `run: yes`; the style checker needs no binary and goes out together with the builder.
+
+Every `gismo:task-reviewer` brief also states, in these terms, what the agent cannot know from its own file:
+- **The level, and the test budget it implies.** Below ultra a reviewer runs only suites filtered to the changed files. When step 3 ran, it has already run them once: give its result (suites, pass counts), so that a reviewer runs a suite again only to observe a specific attack. The full suite is run at ultra only, and by step 3.
+- **Where scratch goes.** Attack drivers, their binaries and copies of base-revision files go under `/tmp`. `D` receives the reviewer's finding file and the logs `run_logged.sh` writes, nothing else, and the source tree receives nothing.
+- **No git command that writes,** `git fetch` included.
 
 ## 3. Build and run (large, ultra, or `--build`)
 
@@ -122,29 +133,38 @@ Ask the user before this step, in plain words: it temporarily reverts individual
 `D/review.md`. Merge `findings/*.md` and `input/lint.tsv`:
 - A finding reported by two agents appears once, citing both.
 - Keep each agent's severity and evidence label. Lower or drop a finding only for a reason you state.
-- Script findings need no elaboration: group them by rule with a count and the locations.
+- Script findings need no elaboration: group them by rule with a count and the locations. That holds for the `major` and `minor` rows of `lint.tsv`. A `note` row is a prompt the script could not judge (ID-MOVE, ID-INTLOOP on `size_t`, CM-EMPH): it enters the report only as the finding the style checker made of it, and one the style checker passed over is not a finding.
+- Each finding file ends with a `## Checked` section. A line there beginning `Pre-existing:` names a defect that was in the code before the change: copy those lines into the report's **Pre-existing** section. They are not findings, are not triaged and are not counted.
+- A number in the report is the output of a command on its source (`cut -f1 D/input/lint.tsv | sort | uniq -c`, `grep -c` on a log), never a figure retyped from a finding's prose.
+- A finding has one evidence label: that of the weakest claim its direction rests on. Where a reviewer measured one part and reasoned another, split it into two findings, or label the whole `REASONED` and say which part was measured.
 
 **Triage every finding** into one action class. It decides what the resolve step may do with it.
 
 | Class | A finding belongs here when | Resolve does |
 |---|---|---|
 | `mechanical` | a script decided it AND fixing it changes no executable token: WS-TAB, WS-TRAIL, WS-CRLF, DX-TAG, NS-CLOSE, CM-NARR, CM-DEAD, CM-LINEREF, HD-FILE, HD-MPL, HD-AUTHOR | applies them as one batch, after one yes |
-| `local` | it is `MEASURED`, there is one evident remedy, and the remedy stays inside the files of the change: every other script finding, a missing doxygen block, an uncommented test, an uninitialised member | turns them into tasks for the closed loop |
-| `decision` | anything else: every `REASONED` or `UNVERIFIED` finding, every debate topic, and whatever would change a public interface, touch a file outside the change, or admits more than one reasonable fix | asks the user |
+| `local` | it is `MEASURED`, there is one evident remedy, and the remedy stays inside the files of the change: every other `major` or `minor` script finding, a missing doxygen block, an uncommented test, an uninitialised member | turns them into tasks for the closed loop |
+| `confirm` | it is `REASONED`, there is one evident remedy, and the remedy stays inside the files of the change and alters no public interface: a doxygen sentence that omits a new precondition, a test that needs its comments, a test narrowed to what it can prove | shows them as one list and asks once; any the user picks out become `decision`, the rest become tasks |
+| `decision` | anything else that asks for a change: every `UNVERIFIED` finding, every debate topic, and whatever would change a public interface, touch a file outside the change, or admits more than one reasonable fix | asks the user, one finding at a time |
 
-When unsure between two classes, take the one further down the table. You may move a finding down, never up: a reviewer's `REASONED` finding is not yours to declare mechanical, because a finding in the first two classes is acted on without the user being asked about it individually.
+When unsure between two classes, take the one further down the table. You may move a finding down, never up: a reviewer's `REASONED` finding is not yours to declare mechanical or local, because a finding in those two classes is acted on without the user having seen it named in a question.
+
+A fifth class stands outside that order. A finding is `info` when it asks for nothing: its direction is "none", it reports a number for the author's judgement (CM-VOLUME, FMT-CLANG), or its own text says the rule is met. Resolve lists `info` findings and asks nothing about them. Only a `note` can be `info`; a finding that asks for nothing yet is graded `minor` or above is a `decision`, and so is a note you are not sure asks for nothing.
 
 ```
 REVIEW: <level> — <b> blocker, <m> major, <k> minor, <j> note
-Triage: <n> mechanical, <n> local, <n> decision
+Triage: <n> mechanical, <n> local, <n> confirm, <n> decision, <n> info
 Target: <what was reviewed>   Files: <n>   Added lines: <n> (comments <pct>%)
+Excluded: <changed files left out of the target, or "none">
 
+## Your question       (when the request asked one: the answer first, then the findings it rests on)
 ## Blockers            (omit an empty section)
 ## Major
 ## Minor
 ## Notes
 ## Debate rulings      (when a panel ran)
 ## Refuted             (ultra)
+## Pre-existing        (defects the reviewers met that the change did not cause; one line each)
 ## Build and test      (what was built and run, pass/fail, log paths)
 ## Not checked         (every check this level or these flags skipped, and each tool that was missing)
 ```
@@ -152,7 +172,7 @@ Target: <what was reviewed>   Files: <n>   Added lines: <n> (comments <pct>%)
 Each finding is one block:
 
 ```
-### R<n> | <severity> | <MEASURED|REASONED|UNVERIFIED> | <RULE-ID or -> | <path>:<line> | <mechanical|local|decision>
+### R<n> | <severity> | <MEASURED|REASONED|UNVERIFIED> | <RULE-ID or -> | <path>:<line> | <mechanical|local|confirm|decision|info>
 Source: <finding file(s) and their F-numbers, or lint>
 What: …
 Evidence: …
@@ -170,11 +190,17 @@ Then tell the user, in a few lines: the headline counts, the blockers and majors
 The order matters: a decision can make smaller findings moot, and edits shift line numbers, so decisions come first and the mechanical batch last. Nothing is changed before the user has said yes to that step, and the reviewers never fix their own findings — fixes go through the implementing agents and their own review.
 
 1. **Check the report is current.** Recompute the diff's md5 as in step 1 and compare with `input/diff.md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
-2. **Show the triage counts**, then take the `decision` findings, most severe first, a few at a time. For each, in plain words and without file-and-line detail in the question: what is at stake, what happens under each option, and your recommendation. A debate ruling is the recommendation where there is one, with the argument against it. The user answers `fix` (and how, where there is a choice), `accept` (the code stays; record why) or `defer`. Write each answer to `D/decisions.md` as it is given:
-   `R<n> — fix | accept | defer — <date> — <the user's reason or chosen option, in their words>`
-3. **Plan the fixes.** The `local` findings and every decision answered `fix` become a plan in `D/fix-plan.md`, written to the conventions of `/gismo:plan`, with each task carrying the finding's evidence and direction so the implementer rediscovers nothing. Show the task list and, on a yes, run `/gismo:implement` on it; its own triage picks quick or standard mode. With nothing to fix, skip this step.
+2. **Show the triage counts** and name the `info` findings in a line each; nothing is asked about them. Then put the `confirm` findings to the user as one list — a line each, saying what would be changed — and ask once whether to fix them all or which to discuss first. Say in the question that these rest on a reviewer's reading, not on something that was run. Those picked out join the `decision` findings; the rest are recorded as `fix`. Then take the `decision` findings, most severe first, a few at a time. For each, in plain words and without file-and-line detail in the question: what is at stake, what happens under each option, and your recommendation. A debate ruling is the recommendation where there is one, with the argument against it. When the user asks what a finding means instead of answering, explain it — what the code does today and the evidence — and ask again. The user answers:
+   - `fix` (and how, where there is a choice);
+   - `accept` — the code stays; record why;
+   - `defer`;
+   - `elsewhere` — the finding is real but is not settled by editing this change. Ask which form it takes. A **handover**, for a fix that belongs in another branch or pull request: write `D/handover-R<n>-<slug>.md` with the problem, the evidence and its log paths, the proposed fix, and whether the same defect occurs elsewhere in the tree (ask `gismo:indexer`). A **comment**, for something to raise with the maintainers: write `D/comment-R<n>.md`, the text for the user to post themselves. If the finding sits in an uncommitted edit, taking it elsewhere means reverting that edit here; say so, and make the revert a task in step 3.
+
+   Write each answer to `D/decisions.md` as it is given:
+   `R<n> — fix | accept | defer | elsewhere — <date> — <the user's reason or chosen option, in their words>`
+3. **Plan the fixes.** The `local` findings, the `confirm` findings left in the list and every decision answered `fix` become a plan in `D/fix-plan.md`, written to the conventions of `/gismo:plan`, with each task carrying the finding's evidence and direction so the implementer rediscovers nothing. Show the task list and, on a yes, run `/gismo:implement` on it; its own triage picks quick or standard mode. With nothing to fix, skip this step.
 4. **Apply the mechanical batch.** Re-run `review_lint.sh` first — the list in the report predates step 3. On a yes, dispatch one `gismo:doc-writer` with the fresh lint lines of the mechanical rules and the instruction that no executable token may change; it syntax-checks what it touched.
-5. **Confirm.** Re-run `review_lint.sh` and the syntax check. Append a `## Outcome` section to `D/decisions.md`: each finding as `fixed`, `accepted`, `deferred` or `still present`. Tell the user the counts and suggest a `light` review of the result, which gets its own dated directory.
+5. **Confirm.** Re-run `review_lint.sh` and the syntax check. Append a `## Outcome` section to `D/decisions.md`: each finding as `fixed`, `accepted`, `deferred`, `handed over` (with the file written for it) or `still present`. Tell the user the counts and suggest a `light` review of the result, which gets its own dated directory.
 
 A deferred finding simply stays open in the report. Never commit; the user does.
 
@@ -191,11 +217,12 @@ A deferred finding simply stays open in the report. Never commit; the user does.
 
 - The level is the budget. Do not add a reviewer the level does not list because the change looks interesting; suggest the next level in the report.
 - One dispatch per row of the table in step 2. A reviewer that returns without its `FINDINGS:` line did not finish: continue that agent, do not start a second one.
+- A reviewer runs what its level lists. The full test suite, valgrind and the mutation proof belong to ultra, and a reviewer that reaches for one of them at a lower level has spent the next level's budget unasked.
 - Do not re-run a reviewer to get a second opinion on a finding; that is what the refutation pass and the panel are for, at the levels that have them.
 
 ## Safety
 
-- No agent commits, and neither do you. No git command that writes, never `git worktree prune`.
+- No agent commits, and neither do you. No git command that writes, never `git worktree prune`. `git fetch` writes: compare against the refs already in the repository, and say in the report how old the base ref is when that matters.
 - Builds only through `gismo:builder`; never a bare `make`.
 - Never post to a pull request. The report is a file.
 - Files are never duplicated from the shell (`cp`, `mv`, a redirect from one file into another). Say so in every brief you write: agents do not see the user's own instructions.

@@ -162,14 +162,16 @@ ranked report. The review itself never edits source (its one touch on the tree i
 ultra-level mutation proof, run only after you confirm, which restores every file
 byte-for-byte). Every finding carries a rule ID where one applies, an evidence label —
 `MEASURED` (a command ran), `REASONED` (derived from reading) or `UNVERIFIED` — and an
-action class (`mechanical`, `local` or `decision`) that says how it can be dealt with.
+action class (`mechanical`, `local`, `confirm`, `decision` or `info`) that says how it can
+be dealt with.
 Everything a run produces sits in one dated directory, so a change can be reviewed again
 after it is fixed without overwriting the first run:
 
 ```
 .claude/plans/<slug>/review/<YYYYMMDD-HHMM>/
   review.md        the report
-  decisions.md     your answers from the resolve step
+  decisions.md     your answers from the resolve step, which also writes fix-plan.md,
+                   handover-R<n>-*.md and comment-R<n>.md
   input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5
   findings/        one file per reviewer (style.md, correctness.md, ...)
   debate/          topics.md and one file per position
@@ -197,13 +199,19 @@ rule that keeps being broken gets reworded.
 real decisions, so each finding is triaged when the report is written. `mechanical` findings
 were decided by a script and change no executable token (whitespace, doxygen tag form, a
 narration comment). `local` findings are measured defects with one evident remedy inside
-the change (a missing doxygen block, `int` for an index, an uncommented test). Everything
-else — anything reasoned rather than measured, any debate topic, anything touching a public
-interface — is a `decision`. The resolve step works from the report file, right after the
-review or in a later session: it asks you the decisions first, a few at a time and in plain
-words (`fix`, `accept` or `defer`, recorded in `decisions.md`), then turns the `local`
-findings and your `fix` answers into a plan for `/gismo:implement`, then applies the
-mechanical batch through `gismo:doc-writer`, and finally re-runs the lint. Each of those
+the change (a missing doxygen block, `int` for an index, an uncommented test). `confirm`
+findings are reasoned rather than measured but have one evident remedy inside the change (a
+doxygen sentence that omits a new precondition). Everything else that asks for a change —
+anything unverified, any debate topic, anything touching a public interface or admitting
+more than one fix — is a `decision`. A note that asks for nothing is `info`. The resolve
+step works from the report file, right after the review or in a later session: it names the
+`info` findings, shows the `confirm` findings as one list and asks once, then asks you the
+decisions, a few at a time and in plain words. You answer `fix`, `accept`, `defer` or
+`elsewhere` (recorded in `decisions.md`); `elsewhere` is for a finding that is real but
+belongs in another branch or with the maintainers, and produces a handover file or the
+text of a comment for you to post. It then turns the `local` findings, the confirmed ones
+and your `fix` answers into a plan for `/gismo:implement`, applies the mechanical batch
+through `gismo:doc-writer`, and finally re-runs the lint. Each of those
 steps waits for your yes, and the reviewers never fix their own findings.
 
 **Commented examples and tests.** Examples and unit tests are reviewed by reading, so the

@@ -17,7 +17,12 @@ Output (stdout, TSV)::
     STAT TAB TOTAL TAB added=<n> TAB comment=<n> TAB share=<pct>
     STATUS: OK | STATUS: FINDINGS <n> | STATUS: FAIL <reason>
 
-``<n>`` counts major and minor findings; notes are listed but never decide the status.
+``<n>`` counts major and minor findings; notes are listed but never decide the status. A rule
+may report some findings at a lower severity than its table entry (``ID-INTLOOP`` reports
+``size_t`` loops as notes). Files with fewer than ``STAT_MIN_ADDED`` added lines get no
+per-file ``STAT`` row but still count in the total. ``FMT-CLANG`` yields at most one note per
+file, summarising the differing ranges. ``DX-TAG`` flags a backslash command on an added line
+only when the same command is absent from the lines its hunk removed.
 
 Exit: 0 no major or minor findings, 1 otherwise, 2 error.
 
@@ -100,9 +105,22 @@ CXX17_DIRS: Tuple[str, ...] = ("src/", "examples/", "unittests/")
 
 #: Loop-variable types that must be ``index_t`` (ID-INTLOOP). Only the classic three-clause
 #: header matches: the variable is followed by an initialiser (``=``, ``(``, ``{``) or ``;``,
-#: never by the ``:`` of a range-based for.
+#: never by the ``:`` of a range-based for. ``short_t`` (dimensions, small counts) does not
+#: match.
 INTLOOP_RE = re.compile(
     r"\bfor\s*\(\s*(?:const\s+)?(unsigned\s+int|unsigned|int|std::size_t|size_t)\s+\w+\s*[=({;]")
+
+#: Loop-variable types of :data:`INTLOOP_RE` that are reported as a note instead of the
+#: rule's default severity: ``size_t`` is the right type for a std container, and a line-based
+#: check cannot see the container's type.
+INTLOOP_NOTE_TYPES: frozenset = frozenset({"size_t", "std::size_t"})
+
+#: A file with fewer added lines than this gets no per-file comment-share ``STAT`` row; the
+#: share of a handful of lines is not meaningful. Such files still count in the total.
+STAT_MIN_ADDED = 30
+
+#: Longest list of differing ranges spelled out in a ``FMT-CLANG`` message.
+FMT_MAX_RANGES = 10
 
 #: Leading comment lines searched for the licence header of a new file (HD-FILE/MPL/AUTHOR).
 HEADER_SCAN_CAP = 120
@@ -371,10 +389,20 @@ def dx_hits(lines: Sequence[str], infos: Sequence[LineInfo]) -> List[Tuple[int, 
 # ---------------------------------------------------------------------------------------
 
 class Finding(NamedTuple):
+    """One lint finding.
+
+    :param severity: overrides the rule's entry in :data:`SEVERITY` when set
+    """
     path: str
     line: int
     rule: str
     message: str
+    severity: Optional[str] = None
+
+
+def severity_of(f: Finding) -> str:
+    """Return the effective severity of a finding (per-finding override, else per rule)."""
+    return f.severity or SEVERITY[f.rule]
 
 
 def _comment_text(line: str, info: LineInfo) -> str:
@@ -429,7 +457,8 @@ def _is_dead_code(text: str) -> bool:
 
 
 def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
-              sibling_hpp: bool) -> Tuple[List[Finding], int, int]:
+              sibling_hpp: bool, removed: Optional[Dict[int, Set[str]]] = None
+              ) -> Tuple[List[Finding], int, int]:
     """Run every text-level rule on one file.
 
     :param path: path relative to the G+Smo root (decides which rules apply)
@@ -437,6 +466,9 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
     :param status: scope status; ``"A"`` enables the new-file rules
     :param changed: 1-based line numbers to report on, or ``None`` for all lines
     :param sibling_hpp: whether a ``<stem>.hpp`` exists beside a new ``.h``
+    :param removed: for each added line, the backslash doxygen commands on the lines its hunk
+        removed (see :func:`removed_dx_commands`); DX-TAG skips a command found there, since
+        the tag predates the edit. ``None`` flags every backslash command on a checked line
     :returns: ``(findings, added line count, comment line count)`` over the checked lines
     """
     raw_lines = data.split("\n")
@@ -452,8 +484,8 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
     total = len(lines)
     sel = set(range(1, total + 1)) if changed is None else {n for n in changed if 1 <= n <= total}
 
-    def add(ln: int, rule: str, msg: str) -> None:
-        out.append(Finding(path, ln, rule, msg))
+    def add(ln: int, rule: str, msg: str, severity: Optional[str] = None) -> None:
+        out.append(Finding(path, ln, rule, msg, severity))
 
     crlf = [i + 1 for i, l in enumerate(raw_lines) if l.endswith("\r") and (i + 1) in sel]
     if crlf:
@@ -521,7 +553,12 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
             add(ln, "ID-MOVE", "std::move: acceptable only on non-G+Smo values")
         m = INTLOOP_RE.search(code)
         if m:
-            add(ln, "ID-INTLOOP", "loop variable of type '%s'; use index_t" % re.sub(r"\s+", " ", m.group(1)))
+            ltype = re.sub(r"\s+", " ", m.group(1))
+            if ltype in INTLOOP_NOTE_TYPES:
+                add(ln, "ID-INTLOOP", "loop variable of type '%s': right for a std container, "
+                    "index_t for a matrix, basis or DoF index" % ltype, "note")
+            else:
+                add(ln, "ID-INTLOOP", "loop variable of type '%s'; use index_t" % ltype)
         if path.startswith(CXX17_DIRS):
             for pat, what in CXX17_PATTERNS:
                 m = re.search(pat, code)
@@ -539,7 +576,7 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
                 add(ln, "EX-GETVALUES", "getValues(argc, ...) must be inside try")
 
     for ln, col, tag in dx_hits(lines, infos):
-        if (ln + 1) in sel:
+        if (ln + 1) in sel and not (removed and tag in removed.get(ln + 1, ())):
             add(ln + 1, "DX-TAG", "use '@%s' instead of '\\%s'" % (tag, tag))
 
     # --- file-level rules, reported on line 1 ---
@@ -550,6 +587,48 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
         if new:
             _new_file_rules(path, name, stem, dirs, lines, infos, sibling_hpp, add)
     return out, added, comment_lines
+
+
+def removed_dx_commands(repo_dir: str, ref: str, path: str) -> Dict[int, Set[str]]:
+    """Map each added line to the backslash doxygen commands removed by its hunk.
+
+    Runs ``git diff -U0`` and, per hunk, collects the commands of :data:`DX_COMMANDS` written
+    as ``\\cmd`` on the removed lines. DX-TAG uses this to tell a tag the change introduced
+    from one that was already there while other text on the line was edited. A rename is not
+    followed (``path`` alone is diffed), so a renamed file reports as all added.
+
+    :param repo_dir: working directory of the git repository holding ``path``
+    :param ref: revision the working tree is compared with
+    :param path: file path relative to ``repo_dir``
+    :returns: ``{new line number: commands}``; empty when git fails or nothing was removed
+    """
+    try:
+        r = _run(["git", "-c", "core.quotepath=off", "diff", "-U0", ref, "--", path], repo_dir)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if r.returncode != 0:
+        return {}
+    out: Dict[int, Set[str]] = {}
+    span: range = range(0)
+    cmds: Set[str] = set()
+
+    def flush() -> None:
+        if cmds:
+            for n in span:
+                out[n] = set(cmds)
+
+    for l in r.stdout.split("\n"):
+        h = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", l)
+        if h:
+            flush()
+            start = int(h.group(1))
+            span = range(start, start + (1 if h.group(2) is None else int(h.group(2))))
+            cmds = set()
+        elif l.startswith("-") and not l.startswith("---"):
+            cmds.update(m.group(2) for m in DX_TOKEN_RE.finditer(l)
+                        if m.group(1) == "\\" and m.group(2) in DX_COMMANDS)
+    flush()
+    return out
 
 
 def _new_file_rules(path: str, name: str, stem: str, dirs: List[str], lines: List[str],
@@ -625,9 +704,13 @@ def _run(cmd: List[str], cwd: str, stdin: Optional[str] = None, timeout: int = 6
 
 def clang_format_findings(binary: List[str], root: str, path: str, data: str,
                           changed: Optional[Set[int]]) -> Tuple[List[Finding], Optional[str]]:
-    """Report hunks that ``clang-format --lines`` would alter in the changed ranges.
+    """Report that ``clang-format --lines`` would alter the changed ranges.
 
-    :returns: findings (one per hunk) and an error string if clang-format failed
+    A hunk whose old and new lines are all comments or blank is ignored: clang-format
+    reflows comments and ASCII tables that are laid out by hand. The remaining hunks are
+    summarised in a single note per file, located at the first of them.
+
+    :returns: zero or one finding, and an error string if clang-format failed
     """
     cmd = binary + ["--style=file", "--assume-filename=" + os.path.join(root, path)]
     if changed is not None:
@@ -640,14 +723,24 @@ def clang_format_findings(binary: List[str], root: str, path: str, data: str,
     if r.returncode != 0:
         return [], (r.stderr.strip().splitlines() or ["exit %d" % r.returncode])[0]
     old, new = data.split("\n"), r.stdout.split("\n")
-    out: List[Finding] = []
-    for tag, i1, i2, _, _ in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
-        if tag == "equal":
+    def prose_only(infos: List[LineInfo], lo: int, hi: int) -> bool:
+        return all(not infos[k].code.strip() for k in range(lo, hi))
+
+    old_infos, new_infos = lex(old), lex(new)
+    hunks: List[Tuple[int, int]] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag == "equal" or (prose_only(old_infos, i1, i2) and prose_only(new_infos, j1, j2)):
             continue
         first = max(i1 + 1, 1)
-        last = max(i2, first)
-        out.append(Finding(path, first, "FMT-CLANG", "clang-format would alter lines %d-%d" % (first, last)))
-    return out, None
+        hunks.append((first, max(i2, first)))
+    if not hunks:
+        return [], None
+    shown = ", ".join(str(a) if a == b else "%d-%d" % (a, b) for a, b in hunks[:FMT_MAX_RANGES])
+    if len(hunks) > FMT_MAX_RANGES:
+        shown += ", ..."
+    msg = "%d range%s differ%s from .clang-format: %s" % (
+        len(hunks), "" if len(hunks) == 1 else "s", "s" if len(hunks) == 1 else "", shown)
+    return [Finding(path, hunks[0][0], "FMT-CLANG", msg)], None
 
 
 def _ranges(lines: Iterable[int]) -> List[Tuple[int, int]]:
@@ -761,9 +854,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     scope_args: List[str] = (["--base", ns.base] if ns.base else []) + ns.paths
 
     status: Dict[str, str] = {}
+    repo_of: Dict[str, str] = {}
     for l in run_scope(scope_args, env):
-        _, st, p = l.split("\t")
+        repo, st, p = l.split("\t")
         status[p] = st
+        repo_of[p] = repo
     ranges: Optional[Dict[str, Set[int]]] = None
     if ns.all_lines and ns.paths:
         files = walk_paths(root, ns.paths)
@@ -814,7 +909,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         st = status.get(path, "M")
         hpp = os.path.exists(os.path.join(os.path.dirname(full), os.path.basename(path).rsplit(".", 1)[0] + ".hpp"))
-        fnd, added, com = lint_text(path, data, st, changed, hpp)
+        removed = None
+        if changed is not None and st != "A" and path.endswith(CXX_EXT):
+            repo = repo_of.get(path, ".")
+            nested = repo != "."
+            ref = "HEAD"
+            if ns.base and not nested:
+                mb = _run(["git", "merge-base", ns.base, "HEAD"], root)
+                ref = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else "HEAD"
+            removed = removed_dx_commands(os.path.join(root, repo) if nested else root, ref,
+                                          path[len(repo) + 1:] if nested else path)
+        fnd, added, com = lint_text(path, data, st, changed, hpp, removed)
         findings.extend(fnd)
         if path.endswith(CXX_EXT + (".py",)):
             stats.append((path, added, com))
@@ -847,16 +952,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         if key in seen and f.rule != "DX-TAG":
             continue
         seen.add(key)
-        if SEVERITY[f.rule] != "note":
+        sev = severity_of(f)
+        if sev != "note":
             blocking += 1
-        print("%s:%d\t%s\t%s\t%s" % (f.path, f.line, f.rule, SEVERITY[f.rule], f.message.replace("\t", " ")))
+        print("%s:%d\t%s\t%s\t%s" % (f.path, f.line, f.rule, sev, f.message.replace("\t", " ")))
     for tool, reason in skips:
         print("SKIP\t%s\t%s" % (tool, reason))
     ta = tc = 0
     for path, added, com in stats:
         ta += added
         tc += com
-        print("STAT\t%s\tadded=%d\tcomment=%d\tshare=%.1f" % (path, added, com, 100.0 * com / added if added else 0.0))
+        if added >= STAT_MIN_ADDED:
+            print("STAT\t%s\tadded=%d\tcomment=%d\tshare=%.1f" % (path, added, com, 100.0 * com / added))
     print("STAT\tTOTAL\tadded=%d\tcomment=%d\tshare=%.1f" % (ta, tc, 100.0 * tc / ta if ta else 0.0))
     if blocking:
         print("STATUS: FINDINGS %d" % blocking)
