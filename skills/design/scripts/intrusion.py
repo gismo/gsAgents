@@ -42,6 +42,16 @@ SCOPE_SCRIPT = Path(__file__).resolve().parent.parent.parent / "review" / "scrip
 
 # Public API headers live in src/ of the core or of an optional module.
 SRC_RE = re.compile(r"^(optional/[^/]+/)?src/")
+# New examples, unit tests and documentation extend nothing the library builds on, so
+# no budget restricts them. Any other new file (a CMake script, a CI workflow) can
+# change how the core is built and needs an allow row.
+FREE_RE = re.compile(r"^(optional/[^/]+/)?(examples|unittests|doc|docs)/")
+# An allow row that admits both paths of a pair admits every directory of the core, or
+# every optional module, whatever its spelling: such a row is no budget.
+WHOLE_AREA_PROBES = (
+    ("src/", ("src/gsZzProbeA/a.h", "src/gsZzProbeB/b.h")),
+    ("optional/", ("optional/gsZzProbeA/src/a.h", "optional/gsZzProbeB/src/b.h")),
+)
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
 VIRTUAL_RE = re.compile(r"\bvirtual\b")
 CHAR_LITERAL_RE = re.compile(r"'(?:\\.|[^\\'])'")
@@ -238,7 +248,8 @@ def parse_budget(budget_path: Path, root: str) -> Budget:
     :raises Failure: on an unreadable file, an unknown row kind, a ``base`` row
         that is not exactly ``base <repo> <ref>``, a duplicate ``base``
         repository, a path outside the root, a ``home`` or ``allow`` that
-        covers the whole tree, or no ``home`` row.
+        covers the whole tree, an ``allow`` that covers all of ``src/`` or
+        every optional module, or no ``home`` row.
     """
     try:
         raw = budget_path.read_bytes()
@@ -291,6 +302,11 @@ def parse_budget(budget_path: Path, root: str) -> Budget:
                     re.compile(glob_to_regex(a), re.DOTALL)
                 except re.error as e:
                     raise Failure(f"line {no}: allow '{written}' is not a valid glob: {e}")
+            one = Budget(allows=[a])
+            for area, probes in WHOLE_AREA_PROBES:
+                if all(one.allowed(p) for p in probes):
+                    raise Failure(f"line {no}: allow '{written}' covers all of {area}: "
+                                  f"name the directories or files that may change")
             budget.allows.append(a)
         else:
             raise Failure(f"line {no}: unknown row kind '{kind}'")
@@ -399,6 +415,8 @@ def violation_message(status: str, path: str) -> Optional[str]:
         return "renamed"
     if status == "A" and SRC_RE.match(path):
         return "new file under src/"
+    if status == "A" and not FREE_RE.match(path):
+        return "new file that is not an example, unit test or documentation"
     return None
 
 
@@ -610,8 +628,8 @@ def is_home_include(root: str, budget: Budget, suffixes: Set[str], path: str, ta
 
 
 def exempt(status: str, path: str) -> bool:
-    """True for a new file outside ``src/`` (what ``check`` does not flag)."""
-    return status == "A" and not SRC_RE.match(path)
+    """True for a new example, unit test or documentation file (what ``check`` does not flag)."""
+    return status == "A" and bool(FREE_RE.match(path))
 
 
 def cmd_measure(root: str, budget: Budget) -> int:

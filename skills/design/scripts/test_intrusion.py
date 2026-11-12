@@ -574,9 +574,9 @@ def test_glob_star_does_not_cross_slash(root: Path) -> None:
     write(root, "src/gsCore/gsBasis.h", "changed\n")
     rc, out, _ = intrusion(root, "check", budget(root, BASIC + "allow src/*.h\n"))
     assert rc == 1 and finding_paths(out) == ["src/gsCore/gsBasis.h"]
-    rc, out, _ = intrusion(root, "check", budget(root, BASIC + "allow src/**/*.h\n"))
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC + "allow src/**/gsBasis.h\n"))
     assert rc == 0
-    rc, out, _ = intrusion(root, "check", budget(root, BASIC + "allow src/**\n"))
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC + "allow src/gsCore/**\n"))
     assert rc == 0
 
 
@@ -857,6 +857,44 @@ def test_measure_treats_a_glob_character_in_a_name_literally(root: Path) -> None
     rc, out, _ = intrusion(root, "measure", budget(root, BASIC))
     row = [r for r in rows(out, "FILE") if "gsOther.h*" in r][0]
     assert "\tadded=1\t" in row
+
+
+@pytest.mark.parametrize("pattern", ["src", "src/", "src/**", "src/*/**", "src/gs*/**", "src/**/*.h", "optional",
+                                     "optional/**", "optional/*/src/**"])
+def test_allow_that_covers_all_of_core_or_every_module_fails(root: Path, pattern: str) -> None:
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC + f"allow {pattern}\n"))
+    assert rc == 2
+    assert out[-1].startswith("STATUS: FAIL line 2:") and "covers all of" in out[-1]
+
+
+@pytest.mark.parametrize("pattern", ["src/gsCore/**", "src/gsCore/", "src/*", "src/**/gsBasis.h",
+                                     "optional/gsOther/", "optional/gsOther/src/**"])
+def test_allow_of_one_directory_or_module_is_accepted(root: Path, pattern: str) -> None:
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC + f"allow {pattern}\n"))
+    assert rc == 0 and out[-1] == "STATUS: OK"
+
+
+@pytest.mark.parametrize("rel", ["cmake/hook.cmake", ".github/workflows/ci.yml", "extra.cmake",
+                                 "optional/gsOther/CMakeLists.txt"])
+def test_check_flags_new_file_that_is_not_example_test_or_doc(root: Path, rel: str) -> None:
+    write(root, rel, "x\n")
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC))
+    assert rc == 1
+    assert out[0].startswith(f"{rel}:1\tDS-BUDGET\tmajor\tnew file that is not an example")
+    rc, out, _ = intrusion(root, "measure", budget(root, BASIC))
+    assert any(r.endswith("exempt=no") and rel in r for r in rows(out, "FILE"))
+
+
+@pytest.mark.parametrize("rel", ["examples/new.cpp", "unittests/gsNew_test.cpp", "doc/new.dox",
+                                 "optional/gsOther/examples/new.cpp",
+                                 "optional/gsOther/unittests/new_test.cpp",
+                                 "optional/gsOther/docs/new.md"])
+def test_check_passes_new_example_test_or_doc(root: Path, rel: str) -> None:
+    write(root, rel, "x\n")
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC))
+    assert rc == 0 and out[-1] == "STATUS: OK"
+    rc, out, _ = intrusion(root, "measure", budget(root, BASIC))
+    assert any(r.endswith("exempt=yes") and rel in r for r in rows(out, "FILE"))
 
 
 @pytest.mark.parametrize("pattern", ["**", "**/*", "*/**", "?*/**", "*.h", "[a-z]*/x.h"])

@@ -40,11 +40,11 @@ allow   src/gsCore/gsFunctionSet.h          one new virtual with a default body
 
 - `home` — a directory the feature owns and may change freely. At least one.
 - `base` — the ref a repository is compared against: `.` for the G+Smo root, a path for an optional module that is its own git repository. Without a row for a repository, only its uncommitted changes are seen. The ref is the third word; a row carries nothing after it.
-- `allow` — a file outside home that may change, with the reason. A path without wildcards allows that file, or as a directory everything beneath it. A glob is accepted after a leading directory name: `*` stays within one directory, `**` crosses directories. A row that begins with a wildcard is refused, because a glob over the whole tree allows everything. Keep reasons specific: "one new virtual", not "needed", and name files one by one where you can, since a wide glob is a budget that has stopped counting.
+- `allow` — a file outside home that may change, with the reason. A path without wildcards allows that file, or as a directory everything beneath it. A glob is accepted after a leading directory name: `*` stays within one directory, `**` crosses directories. A row that begins with a wildcard is refused, because a glob over the whole tree allows everything; so is a row that covers all of `src/` or every optional module (`src/`, `src/**`, `optional/*/src/**`), for the same reason. Keep reasons specific: "one new virtual", not "needed", and name files one by one where you can, since a wide glob is a budget that has stopped counting.
 
 Paths are written from the G+Smo root and contain no spaces.
 
-Outside home and the allowed files, the check flags every modified, deleted or renamed file, and every new file under `src/` or `optional/<module>/src/`. New examples, unit tests and documentation elsewhere are not flagged.
+Outside home and the allowed files, the check flags every modified, deleted or renamed file, and every new file except examples, unit tests and documentation: a new file under `examples/`, `unittests/`, `doc/` or `docs/`, at the root or in an optional module, is not flagged. A new file anywhere else is, because a new CMake script or workflow can change how the core is built as surely as an edit to `src/` can.
 
 **Only the user widens the budget.** No agent adds an `allow` row on its own judgement, and neither do you: when work turns out to need a core file that is not allowed, put the question to the user — what needs it, what the alternative inside the budget would cost. A budget an agent can extend holds nothing. On a yes, widening is these four edits, made together so that the files never disagree, by whichever skill the user answered in:
 

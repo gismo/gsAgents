@@ -42,8 +42,14 @@ behaviour; this file is where the history lives.
   that is always a `decision` and never auto-fixed. It is not a review `blocker`, because a blocker
   ends the review before the rest of the change is read.
 - **Outside the budget** means: any existing file modified, deleted or renamed outside the feature's
-  `home`, and any new file under `src/` or `optional/<module>/src/`. New examples, tests and
-  documentation are free.
+  `home`, and any new file that is not an example, a unit test or documentation (`examples/`,
+  `unittests/`, `doc/`, `docs/`, at the root or in a module). The first version flagged new files
+  only under `src/`; an independent review on 2026-11-12 showed that a new `cmake/` script or CI
+  workflow then passed the check, and the user chose to narrow the exemption to what the skill
+  text already named.
+- An `allow` row that covers all of `src/` or every optional module (`src/**`, `src/**/*.h`,
+  `optional/*/src/**`) is refused like a row beginning with a wildcard (user's decision,
+  2026-11-12): it allows everything the budget exists to count.
 - The debate panel is offered, never run unasked, when the recommended interface is on rung 3 or 4.
   It is two opus positions and one round. The first proposal copied the review panel (three
   positions, two rounds, six dispatches); the maintainer objected to the cost, and the user is
