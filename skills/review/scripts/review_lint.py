@@ -116,8 +116,13 @@ NARRATION_CHANGE_PATTERNS: List[str] = [
     # A changelog entry opens the comment with a past-tense verb and its object. "Fixed-size",
     # "Changed entries are ...", "Removed elements are ..." and "Updated Lagrangian" describe
     # the program, so the object must be a determiner or a word that marks code ("unused",
-    # "redundant") and a hyphen right after the verb excludes compounds.
-    r"^[\s*/!<]*(?:Added|Fixed|Changed|Refactored|Reverted|Renamed)\s+(?:a|an|the|this|that|to)\b(?!-)",
+    # "redundant") and a hyphen right after the verb excludes compounds. "a" and "to" are
+    # too common after most of these verbs ("Fixed a point on the curve", "Changed a to b",
+    # "Changed to the reference configuration"), so they count only after the verb where
+    # they open a changelog entry: "Added a null check", "Refactored to avoid duplication".
+    r"^[\s*/!<]*(?:Added|Fixed|Changed|Refactored|Reverted|Renamed)\s+(?:an|the|this|that)\b(?!-)",
+    r"^[\s*/!<]*Added\s+a\b(?!-)(?!\s+to\b)",
+    r"^[\s*/!<]*Refactored\s+to\b",
     r"^[\s*/!<]*(?:Removed|Replaced)\s+(?:a|an|this|that|unused|redundant|obsolete|unnecessary"
     r"|the\s+(?:redundant|unused|obsolete|unnecessary|old|former|previous|loop|check|include"
     r"|workaround|hack))\b",

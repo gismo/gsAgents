@@ -5,7 +5,9 @@ Usage: syntax_check.py [--allow-degraded] [--base <ref>] <file> [<file> ...]
 
 --base <ref>: a header is also "new" when it does not exist at the merge base of
 <ref> and HEAD in its own repository (covers headers added by commits on the branch).
-A <ref> that does not resolve in that repository falls back to the git-status test.
+A header that git detects as a rename of a file present at the merge base is not new.
+A <ref> that does not resolve in that repository (or has no merge base with HEAD)
+falls back to the git-status test, with one stderr line per repository and ref.
 
 compile_commands.json in $GISMO_BUILD_DIR is REQUIRED (asserted up front) so every
 file is checked with its real per-target flags -- a submodule file built with
@@ -237,12 +239,51 @@ def _git_out(cwd: str, *args: str) -> Optional[str]:
     return res.stdout.strip() if res.returncode == 0 else None
 
 
-def absent_at_base(path: str, base: str) -> bool:
-    """True if ``path`` does not exist at the merge base of ``base`` and ``HEAD``.
+_UNRESOLVED_REPORTED: set = set()
 
-    Evaluated in the innermost repository containing the file. False when ``base``
-    does not resolve there, when there is no common ancestor, or when git cannot
-    classify the file.
+
+def _report_unresolved_base(top: str, base: str) -> None:
+    """Tell once per (repository, ref) that ``base`` gives no merge base there."""
+    if (top, base) in _UNRESOLVED_REPORTED:
+        return
+    _UNRESOLVED_REPORTED.add((top, base))
+    sys.stderr.write("syntax_check: --base %s does not resolve, or has no merge base "
+                     "with HEAD, in %s; headers there are judged by git status only\n"
+                     % (base, top))
+
+
+def renamed_paths(d: str, mb: str) -> Optional[set]:
+    """Paths (relative to the repository top) that are renames between ``mb`` and ``HEAD``.
+
+    Parsed from NUL-separated ``git diff -M --name-status -z`` output, so paths with
+    spaces or other special characters are exact. Copies (``C``) and adds (``A``)
+    are not included. None if git fails.
+    """
+    out = _git_out(d, "diff", "-M", "--name-status", "-z", mb, "HEAD")
+    if out is None:
+        return None
+    fields = out.split("\0")
+    renamed, i = set(), 0
+    while i < len(fields):
+        status = fields[i]
+        if status[:1] in ("R", "C"):
+            # status, old path, new path
+            if status[:1] == "R" and i + 2 < len(fields):
+                renamed.add(fields[i + 2])
+            i += 3
+        else:
+            i += 2
+    return renamed
+
+
+def absent_at_base(path: str, base: str) -> bool:
+    """True if ``path`` is new relative to the merge base of ``base`` and ``HEAD``.
+
+    New means: absent at the merge base and not git-detected as a rename of a file
+    that existed there (copies and adds are new). Evaluated in the innermost
+    repository containing the file. False when ``base`` does not resolve there or
+    there is no common ancestor (reported once per repository and ref on stderr),
+    or when git cannot classify the file.
     """
     ap = os.path.abspath(path)
     d = os.path.dirname(ap)
@@ -251,6 +292,7 @@ def absent_at_base(path: str, base: str) -> bool:
         return False
     mb = _git_out(d, "merge-base", base, "HEAD")
     if not mb:
+        _report_unresolved_base(top, base)
         return False
     rel = os.path.relpath(os.path.realpath(ap), os.path.realpath(top))
     try:
@@ -258,7 +300,10 @@ def absent_at_base(path: str, base: str) -> bool:
                              capture_output=True, text=True)
     except OSError:
         return False
-    return res.returncode != 0
+    if res.returncode == 0:
+        return False
+    renamed = renamed_paths(d, mb)
+    return renamed is not None and rel not in renamed
 
 
 def is_new_file(path: str, base: str = "") -> bool:
@@ -367,7 +412,11 @@ def main():
         a = args[i]
         if a == "--allow-degraded":
             allow_degraded = True
-        elif a == "--base" and i + 1 < len(args):
+        elif a == "--base":
+            if i + 1 >= len(args):
+                sys.stderr.write("syntax_check: --base needs a ref\n")
+                print("STATUS: FAIL")
+                sys.exit(2)
             i += 1
             base = args[i]
         elif a.startswith("--base="):

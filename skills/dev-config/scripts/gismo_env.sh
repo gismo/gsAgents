@@ -152,7 +152,8 @@ _gismo_env_resolve() {
     # The flags decide, not the build-type name: G+Smo's RelWithDebInfo carries no
     # -DNDEBUG (CMAKE_CXX_FLAGS_RELWITHDEBINFO is `-O2 -g`), so assertions stay live
     # there although the type looks like a release. Order of evidence:
-    #   1. CMakeCache.txt: -DNDEBUG in CMAKE_CXX_FLAGS or CMAKE_CXX_FLAGS_<TYPE>.
+    #   1. CMakeCache.txt: NDEBUG defined (token-wise, last -D/-U wins) in
+    #      CMAKE_CXX_FLAGS followed by CMAKE_CXX_FLAGS_<TYPE>.
     #   2. compile_commands.json: -DNDEBUG on the entries whose file lies under
     #      <root>/src (external libraries and files outside the root are ignored):
     #      1 if all carry it, 0 if none does, unknown if they disagree or there are none.
@@ -168,9 +169,9 @@ _gismo_env_resolve() {
         # -DNDEBUG may also come from add_definitions() and appear only in the compile
         # commands, so the cache alone settles the answer only when it says 1.
         [ -n "$btype" ] && nd=0
-        case "$flags $tflags" in *-DNDEBUG*) nd=1 ;; esac
+        [ "$(_gismo_ndebug flags "$flags $tflags")" = 1 ] && nd=1
         if [ "$nd" != 1 ] && [ -s "$GISMO_BUILD_DIR/compile_commands.json" ]; then
-            nd="$(_gismo_cc_ndebug "$GISMO_BUILD_DIR/compile_commands.json" "$GISMO_ROOT")"
+            nd="$(_gismo_ndebug cc "$GISMO_BUILD_DIR/compile_commands.json" "$GISMO_ROOT")"
         fi
         [ -z "${GISMO_BUILD_TYPE:-}" ] && GISMO_BUILD_TYPE="${btype:-unknown}"
         [ -z "${GISMO_NDEBUG:-}" ] && GISMO_NDEBUG="$nd"
@@ -180,13 +181,16 @@ _gismo_env_resolve() {
     return 0
 }
 
-# Prints 1, 0 or unknown: whether -DNDEBUG is on the compile commands of the sources
-# under <root>/src in a compile_commands.json ($1). $2 is the root. O(entries).
-_gismo_cc_ndebug() {
-    python3 - "$1" "$2" 2>/dev/null <<'PY' || echo unknown
+# Whether NDEBUG is defined by compiler arguments, read token-wise: the last of
+# -DNDEBUG[=v], -D NDEBUG[=v], -UNDEBUG, -U NDEBUG decides; -DNDEBUGX is another macro.
+#   _gismo_ndebug flags <string of arguments>      prints 1 or 0
+#   _gismo_ndebug cc <compile_commands.json> <root>
+#       prints 1, 0 or unknown: whether all sources under <root>/src are compiled with
+#       NDEBUG defined (1), none are (0), or they disagree or there are none (unknown).
+#       O(entries).
+_gismo_ndebug() {
+    python3 - "$@" 2>/dev/null <<'PY' || echo unknown
 import json, os, shlex, sys
-path, root = sys.argv[1], os.path.realpath(sys.argv[2])
-src = os.path.join(root, "src") + os.sep
 
 
 def defines_ndebug(args):
@@ -204,14 +208,19 @@ def defines_ndebug(args):
     return on
 
 
-flags = []
-for e in json.load(open(path)):
-    f = os.path.realpath(os.path.join(e.get("directory", ""), e["file"]))
-    if not f.startswith(src):
-        continue
-    args = e["arguments"] if "arguments" in e else shlex.split(e["command"])
-    flags.append(defines_ndebug(args))
-print("unknown" if not flags or any(flags) != all(flags) else int(flags[0]))
+if sys.argv[1] == "flags":
+    print(int(defines_ndebug(shlex.split(sys.argv[2]))))
+else:
+    path, root = sys.argv[2], os.path.realpath(sys.argv[3])
+    src = os.path.join(root, "src") + os.sep
+    flags = []
+    for e in json.load(open(path)):
+        f = os.path.realpath(os.path.join(e.get("directory", ""), e["file"]))
+        if not f.startswith(src):
+            continue
+        args = e["arguments"] if "arguments" in e else shlex.split(e["command"])
+        flags.append(defines_ndebug(args))
+    print("unknown" if not flags or any(flags) != all(flags) else int(flags[0]))
 PY
 }
 

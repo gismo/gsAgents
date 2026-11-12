@@ -34,6 +34,7 @@ Exit: 0 ok, 1 proof failure, 2 usage, refusal or git failure (a path that does n
 directory that is not a git repository). Last stdout line is ``STATUS: ...``.
 """
 import argparse
+import bisect
 import os
 import re
 import subprocess
@@ -165,29 +166,31 @@ def _tag_sites(text: str) -> Set[int]:
     A site is a listed command in a doxygen comment (``///``, ``//!``, ``/** */``, ``/*! */``),
     not glued to a preceding word character, outside ``\\f$ .. \\f$``, ``\\f[ .. \\f]``,
     ``\\f{ .. \\f}`` and outside ``code``/``verbatim`` blocks (opened and closed with ``\\`` or
-    ``@``). An unterminated formula or block ends where its comment block ends: state carries
-    over consecutive ``///`` lines only, and is dropped at a blank line, at any other token
-    and at both ends of a ``/** */`` comment.
+    ``@``). An unterminated formula or block ends where its comment block ends: state
+    carries over from one doxygen comment to the next as long as every line in between holds
+    a doxygen comment (code sharing the line with one does not matter), and is dropped at the
+    first line without one and at the close of a ``/** */`` or ``/*! */`` comment.
     """
     sites: Set[int] = set()
     inline = display = False
     block = ""
+    newlines = [i for i, ch in enumerate(text) if ch == "\n"]
+    prev_last = -2  # last line index holding a doxygen comment
     for kind, a, b in _scan(text):
         if kind == "space":
-            if text.count("\n", a, b) >= 2:
-                inline = display = False
-                block = ""
             continue
         body = text[a:b]
         is_doc = (kind == "lcom" and (body.startswith("///") and not body.startswith("////")
                                       or body.startswith("//!"))) \
             or (kind == "bcom" and (body.startswith("/**") and not body.startswith("/**/")
                                     and not body.startswith("/***") or body.startswith("/*!")))
-        if not is_doc or kind == "bcom":
-            inline = display = False
-            block = ""
         if not is_doc:
             continue
+        first = bisect.bisect_left(newlines, a)
+        if first > prev_last + 1:
+            inline = display = False
+            block = ""
+        prev_last = bisect.bisect_left(newlines, b - 1)
         for m in _DOC_CMD_RE.finditer(body):
             lead, name = m.group(1), m.group(2)
             pos = a + m.start(1)

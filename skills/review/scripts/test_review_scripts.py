@@ -315,6 +315,13 @@ MUST_NOT_FLAG_NARR = [
     "// Fixed-size blocks avoid reallocation",
     "// Removed elements are kept in m_trash",
     "// Changed entries are marked in the mask",
+    "// Added to the stiffness matrix",
+    "// Changed to the reference configuration",
+    "// Fixed a point on the curve",
+    "// Changed a to b in the matrix",
+    'const char* a = "Added the null check";',
+    'const char* a = R"(Added the null check)";',
+    'const char* a = R"(// Added the null check)";',
     'gsInfo << "Processing task 4 of 8";',
     'gsInfo << "Round 1: refine uniformly";',
 ]
@@ -693,3 +700,37 @@ def test_proof_refuses_rewrite_inside_open_formula() -> None:
     assert cleanup.verify_doxygen_rewrite(old, "/// \\f$ a\n/// @ref b\n") != []
     old = "/// \\f[ a\n/// \\ref b\n/// \\f]\n"
     assert cleanup.verify_doxygen_rewrite(old, "/// \\f[ a\n/// @ref b\n/// \\f]\n") != []
+
+
+def _rewrite_is_proved(old: str) -> bool:
+    new, _ = cleanup.rewrite_doxygen_tags(old)
+    return cleanup.verify_doxygen_rewrite(old, new) == []
+
+
+def test_formula_state_survives_code_on_a_doxygen_line() -> None:
+    old = "/// \\f$ a\nint y; ///< \\f$ q\n/// \\ref b\n"
+    assert _rewrite_is_proved(old)
+
+
+def test_formula_state_survives_start_of_a_block_comment() -> None:
+    old = "/// \\f$ a\n/*! \\f$\n \\ref q */\n"
+    assert _rewrite_is_proved(old)
+
+
+DX_PIECES = [
+    "/// \\f$ a", "/// \\f$", "/// \\f[ x", "/// \\f]", "/// \\ref b", "/// \\code",
+    "/// \\endcode", "/// text", "//! \\f$ a", "//! \\ref c", "int y; ///< \\f$ q",
+    "int y; ///< \\ref q", "int z;", "", "// \\ref plain", "//// \\ref four",
+    "/** \\f$ a */", "/** \\ref z */", "/*! \\f$\n \\ref q */", "/**\n * \\f[\n * \\ref w\n */",
+    "/* \\ref no */", 'const char *s = "\\ref";', "/// \\f$ a \\f$ \\ref d",
+    "/// \\verbatim", "/// \\endverbatim", "/// \\f{align}{ x", "/// \\f}",
+]
+
+
+def test_rewrite_and_proof_agree_on_random_comment_sequences() -> None:
+    import random
+    rng = random.Random(20240607)
+    for _ in range(400):
+        old = "\n".join(rng.choice(DX_PIECES) for _ in range(rng.randint(2, 8))) + "\n"
+        new, _ = cleanup.rewrite_doxygen_tags(old)
+        assert cleanup.verify_doxygen_rewrite(old, new) == [], old

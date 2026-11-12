@@ -263,6 +263,20 @@ def test_ndebug_reads_arguments_as_tokens(tmp_path: Path, extra: str, expected: 
     assert env_probe(root, 'gismo_env; echo "$GISMO_NDEBUG"')[0] == expected
 
 
+@pytest.mark.parametrize("cache_flags,expected", [
+    ("-O3 -DNDEBUG", "1"),
+    ("-DNDEBUG=1", "1"),
+    ("-D NDEBUG", "1"),
+    ("-UNDEBUG -DNDEBUG", "1"),
+    ("-DNDEBUG -UNDEBUG", "0"),
+    ("-DNDEBUG -U NDEBUG", "0"),
+    ("-DNDEBUGX", "0"),
+])
+def test_cache_ndebug_reads_flags_as_tokens(tmp_path: Path, cache_flags: str, expected: str) -> None:
+    cache = f"CMAKE_BUILD_TYPE:STRING=Release\nCMAKE_CXX_FLAGS_RELEASE:STRING={cache_flags}\n"
+    assert ndebug(tmp_path, [("src/gsCore/gsA.cpp", False)], cache) == expected
+
+
 # --- --base ---------------------------------------------------------------------------------
 
 def run_check_base(root: Path, base: str, *files: Path) -> subprocess.CompletedProcess:
@@ -308,3 +322,64 @@ def test_base_that_does_not_resolve_falls_back(branch_tree: Path) -> None:
     res = run_check_base(branch_tree, "no-such-ref", h)
     assert f"  OK   {h}  (needs gismo.h)" in res.stdout and res.returncode == 0
     assert "Traceback" not in res.stderr
+
+
+def test_unresolvable_base_is_reported_once_per_repository_and_ref(branch_tree: Path) -> None:
+    h1 = write(branch_tree / "src/gsCore/gsNew1.h", NEEDS_GISMO)
+    h2 = write(branch_tree / "src/gsCore/gsNew2.h", NEEDS_GISMO)
+    commit_all(branch_tree)
+    res = run_check_base(branch_tree, "mian", h1, h2)
+    assert res.returncode == 0
+    lines = [ln for ln in res.stderr.splitlines() if "mian" in ln]
+    assert len(lines) == 1
+    assert str(branch_tree) in lines[0] and "git status only" in lines[0]
+
+
+def test_base_without_merge_base_is_reported(branch_tree: Path) -> None:
+    git(branch_tree, "checkout", "-q", "--orphan", "unrelated")
+    h = write(branch_tree / "src/gsCore/gsNew.h", NEEDS_GISMO)
+    commit_all(branch_tree)
+    res = run_check_base(branch_tree, "main", h)
+    assert "main" in res.stderr and "git status only" in res.stderr
+    assert res.returncode == 0
+
+
+def test_base_renamed_header_is_not_new(branch_tree: Path) -> None:
+    old = branch_tree / "src/gsCore/gsOld.h"
+    renamed = branch_tree / "src/gsCore/gsRenamed.h"
+    old.rename(renamed)
+    added = write(branch_tree / "src/gsCore/gsAdded.h", NEEDS_GISMO + "int z;\n")
+    commit_all(branch_tree)
+    res = run_check_base(branch_tree, "main", renamed, added)
+    assert f"  OK   {renamed}  (needs gismo.h)" in res.stdout
+    assert f"  FAIL {added}  (not self-contained" in res.stdout
+    assert res.returncode == 1
+
+
+def test_base_rename_to_path_with_space_is_not_new(branch_tree: Path) -> None:
+    old = branch_tree / "src/gsCore/gsOld.h"
+    renamed = branch_tree / "src/gsCore/gs Renamed.h"
+    old.rename(renamed)
+    commit_all(branch_tree)
+    res = run_check_base(branch_tree, "main", renamed)
+    assert f"  OK   {renamed}  (needs gismo.h)" in res.stdout
+    assert res.returncode == 0
+
+
+def test_base_copy_is_still_new(branch_tree: Path) -> None:
+    copy = write(branch_tree / "src/gsCore/gsCopy.h", NEEDS_GISMO)
+    commit_all(branch_tree)
+    res = run_check_base(branch_tree, "main", copy)
+    assert f"  FAIL {copy}  (not self-contained" in res.stdout
+    assert res.returncode == 1
+
+
+def test_base_without_value_is_an_error(branch_tree: Path) -> None:
+    h = write(branch_tree / "src/gsCore/gsNew.h", NEEDS_GISMO)
+    env = {**os.environ, "GISMO_ROOT": str(branch_tree),
+           "GISMO_BUILD_DIR": str(branch_tree / "build")}
+    res = subprocess.run([sys.executable, str(SYNTAX_CHECK), str(h), "--base"],
+                         capture_output=True, text=True, env=env)
+    assert res.returncode == 2
+    assert "--base needs a ref" in res.stderr
+    assert "OK" not in res.stdout and "FAIL " not in res.stdout.replace("STATUS: FAIL", "")
