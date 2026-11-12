@@ -543,6 +543,13 @@ def test_budget_base_row_with_trailing_words_fails(root: Path) -> None:
     assert rc == 0
 
 
+@pytest.mark.parametrize("command", ["check", "measure"])
+def test_budget_allow_glob_that_does_not_compile_fails_at_parse(root: Path, command: str) -> None:
+    write(root, "optional/gsMod/src/gsMod/gsMod.cpp", "int a;\nint b;\n")
+    rc, out, _ = intrusion(root, command, budget(root, BASIC + "allow src/gsCore/[z-a].h\n"))
+    assert rc == 2 and out[-1].startswith("STATUS: FAIL line 2:"), out
+
+
 @pytest.mark.parametrize("home", ["home .", "home /", "home ./", "home src/..", "home"])
 def test_budget_home_of_everything_fails(root: Path, home: str) -> None:
     rc, out, _ = intrusion(root, "check", budget(root, home + "\n"))

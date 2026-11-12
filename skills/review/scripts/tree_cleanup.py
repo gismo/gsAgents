@@ -17,9 +17,14 @@ Passes:
 
 Default is a dry run (per-file counts and a total). ``--apply`` refuses to run when
 ``git status`` shows changes to tracked files of the target repository, so the resulting
-diff is the cleanup alone; it never commits. After applying, a proof is computed and printed.
-Both proofs compare each changed file with ``git show HEAD:<path>`` using a tokenizer of their
-own (:func:`_scan`), not the lexer of the rewrite:
+diff is the cleanup alone; it never commits. Each file's rewrite is computed in memory and
+proved against the file's own text before anything is written; a file whose rewrite the
+proof refuses is left untouched and reported on a ``SKIP<TAB><path><TAB><first problem>`` row
+(dry runs report the same rows), and the final ``STATUS:`` line gives the number skipped next
+to the number changed. After applying, the proof is computed again over the whole tree and
+printed. Both proofs compare each changed file with the original text (``git show
+HEAD:<path>`` for the tree-wide one) using a tokenizer of their own (:func:`_scan`), not the
+lexer of the rewrite:
 
 * whitespace: the token streams are equal; string, character and raw string literals are
   compared byte for byte, comments and code up to white space;
@@ -190,7 +195,9 @@ def _tag_sites(text: str) -> Set[int]:
         if first > prev_last + 1:
             inline = display = False
             block = ""
-        prev_last = bisect.bisect_left(newlines, b - 1)
+        # A line comment spliced by a trailing backslash ends on the newline; the (empty)
+        # line that the splice reaches still belongs to the comment.
+        prev_last = bisect.bisect_left(newlines, b if text[b - 1] == "\n" else b - 1)
         for m in _DOC_CMD_RE.finditer(body):
             lead, name = m.group(1), m.group(2)
             pos = a + m.start(1)
@@ -380,6 +387,8 @@ def run(argv: Optional[List[str]] = None) -> int:
 
     totals = {"files": 0, "trail": 0, "tabs": 0, "crlf": 0, "inline_tabs": 0, "tags": 0}
     changed_by_repo: Dict[str, List[str]] = {}
+    skipped = 0
+    verify = verify_whitespace_rewrite if ns.mode == "whitespace" else verify_doxygen_rewrite
     for repo, paths in groups.items():
         for f in tracked_files(repo, paths):
             full = os.path.join(repo, f)
@@ -396,13 +405,20 @@ def run(argv: Optional[List[str]] = None) -> int:
                     continue
                 desc = "trail=%d\ttabs=%d\tcrlf=%d\tinline_tabs_kept=%d" % (
                     c["trail"], c["tabs"], c["crlf"], c["inline_tabs"])
-                for k in ("trail", "tabs", "crlf"):
-                    totals[k] += c[k]
             else:
                 new, n = rewrite_doxygen_tags(data)
                 if new == data:
                     continue
                 desc = "tags=%d" % n
+            problems = verify(data, new)
+            if problems:
+                print("SKIP\t%s\t%s" % (label, problems[0]))
+                skipped += 1
+                continue
+            if ns.mode == "whitespace":
+                for k in ("trail", "tabs", "crlf"):
+                    totals[k] += c[k]
+            else:
                 totals["tags"] += n
             totals["files"] += 1
             print("%s\t%s" % (label, desc))
@@ -416,8 +432,9 @@ def run(argv: Optional[List[str]] = None) -> int:
             totals["files"], totals["trail"], totals["tabs"], totals["crlf"], totals["inline_tabs"]))
     else:
         print("TOTAL\tfiles=%d\ttags=%d" % (totals["files"], totals["tags"]))
+    tail = ", %d skipped" % skipped if skipped else ""
     if not ns.apply:
-        print("STATUS: OK %d files would change (dry run; pass --apply)" % totals["files"])
+        print("STATUS: OK %d files would change%s (dry run; pass --apply)" % (totals["files"], tail))
         return 0
 
     failed: List[str] = []
@@ -436,7 +453,7 @@ def run(argv: Optional[List[str]] = None) -> int:
             print("OFFENDER\t%s" % b)
         print("STATUS: FAIL proof")
         return 1
-    print("STATUS: OK %d files changed" % totals["files"])
+    print("STATUS: OK %d files changed%s" % (totals["files"], tail))
     if ns.mode == "whitespace":
         msg = "style: strip trailing whitespace, expand leading tabs, normalise line endings"
         body = "Mechanical cleanup by tree_cleanup.sh whitespace; git diff -w is empty."

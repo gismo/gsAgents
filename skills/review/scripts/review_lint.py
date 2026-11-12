@@ -122,7 +122,7 @@ NARRATION_CHANGE_PATTERNS: List[str] = [
     # they open a changelog entry: "Added a null check", "Refactored to avoid duplication".
     r"^[\s*/!<]*(?:Added|Fixed|Changed|Refactored|Reverted|Renamed)\s+(?:an|the|this|that)\b(?!-)",
     r"^[\s*/!<]*Added\s+a\b(?!-)(?!\s+to\b)",
-    r"^[\s*/!<]*Refactored\s+to\b",
+    r"^[\s*/!<]*Refactored\s+to\b(?!-)",
     r"^[\s*/!<]*(?:Removed|Replaced)\s+(?:a|an|this|that|unused|redundant|obsolete|unnecessary"
     r"|the\s+(?:redundant|unused|obsolete|unnecessary|old|former|previous|loop|check|include"
     r"|workaround|hack))\b",

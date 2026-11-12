@@ -239,7 +239,8 @@ A deferred finding simply stays open in the report. Never commit; the user does.
 
 - Without `--apply` it only counts. Show the totals.
 - Before `--apply`, tell the user what it will do: it rewrites every listed file in place, it refuses to start on a tree with uncommitted changes, it will conflict with open branches that touch the same lines, and it does not commit. Run it only on an explicit yes.
-- Afterwards relay the proof result. `STATUS: FAIL proof` means the script changed something other than what the pass allows: say so and leave the tree for the user to inspect.
+- Each file is proved before it is written. A file whose rewrite the proof refuses is left untouched and listed on a `SKIP` row with the first problem; the final `STATUS:` line gives the number of files skipped next to the number changed (dry runs list the same rows). Relay the skipped files: they need a manual look.
+- Afterwards relay the tree-wide proof result. `STATUS: FAIL proof` means the script changed something other than what the pass allows: say so and leave the tree for the user to inspect.
 - Suggest one commit per pass and adding each commit hash to `.git-blame-ignore-revs`. Optional modules that are separate repositories are cleaned one at a time by naming their path.
 
 ## Cost discipline

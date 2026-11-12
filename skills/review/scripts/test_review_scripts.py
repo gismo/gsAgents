@@ -283,6 +283,7 @@ MUST_FLAG_NARR = [
 ]
 
 MUST_NOT_FLAG_NARR = [
+    "// Refactored to-do list",
     'gsWarn << "removed the duplicate knots";',
     'gsInfo << "changed from " << a << " to " << b;',
     'gsInfo << "replaced by the average of " << n << " values";',
@@ -455,32 +456,68 @@ def _apply_in_process(root: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
     return rc, capsys.readouterr().out
 
 
-def test_a7_whitespace_proof_fails_when_a_literal_changes(
+def _assert_refused(root: Path, rel: str, before: str, rc: int, out: str) -> None:
+    """The file ``rel`` was left as ``before`` and reported on a ``SKIP`` row; the run is not a
+    proof failure."""
+    assert (root / rel).read_text() == before, out
+    rows = [l.split("\t") for l in out.splitlines() if l.startswith("SKIP\t")]
+    assert [r[1] for r in rows] == [rel] and rows[0][2], out
+    assert rc == 0 and "STATUS: OK 0 files changed, 1 skipped" in out.splitlines(), out
+    assert "FAIL" not in out
+
+
+def test_a7_whitespace_proof_refuses_when_a_literal_changes(
         root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-    write(root, "src/gsCore/x.cpp", 'const char *s = "abc\\\n\tdef";\nint a;  \n')
+    text = 'const char *s = "abc\\\n\tdef";\nint a;  \n'
+    write(root, "src/gsCore/x.cpp", text)
     commit_all(root)
     _faulty(monkeypatch, "whitespace", lambda t: t.replace("\tdef", "    def"))
     rc, out = _apply_in_process(root, monkeypatch, "whitespace", capsys)
-    assert rc == 1 and out.splitlines()[-1] == "STATUS: FAIL proof", out
-    assert "OFFENDER" in out
+    _assert_refused(root, "src/gsCore/x.cpp", text, rc, out)
 
 
-def test_a7_whitespace_proof_fails_when_code_changes(
+def test_a7_whitespace_proof_refuses_when_code_changes(
         root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-    write(root, "src/gsCore/x.cpp", "int a = 1;  \nint b = 2;\n")
+    text = "int a = 1;  \nint b = 2;\n"
+    write(root, "src/gsCore/x.cpp", text)
     commit_all(root)
     _faulty(monkeypatch, "whitespace", lambda t: t.replace("int b = 2;", "int b = 3;"))
     rc, out = _apply_in_process(root, monkeypatch, "whitespace", capsys)
-    assert rc == 1 and out.splitlines()[-1] == "STATUS: FAIL proof", out
+    _assert_refused(root, "src/gsCore/x.cpp", text, rc, out)
 
 
-def test_a7_whitespace_proof_fails_when_a_raw_literal_changes(
+def test_a7_whitespace_proof_refuses_when_a_raw_literal_changes(
         root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-    write(root, "src/gsCore/x.cpp", 'auto r = R"x(\n  a\n)x";\nint a;  \n')
+    text = 'auto r = R"x(\n  a\n)x";\nint a;  \n'
+    write(root, "src/gsCore/x.cpp", text)
     commit_all(root)
     _faulty(monkeypatch, "whitespace", lambda t: t.replace("  a\n", "  a \n"))
     rc, out = _apply_in_process(root, monkeypatch, "whitespace", capsys)
+    _assert_refused(root, "src/gsCore/x.cpp", text, rc, out)
+
+
+def test_a7_whitespace_dry_run_reports_refused_files(
+        root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    write(root, "src/gsCore/x.cpp", "int a = 1;  \nint b = 2;\n")
+    write(root, "src/gsCore/y.cpp", "int c;  \n")
+    commit_all(root)
+    _faulty(monkeypatch, "whitespace", lambda t: t.replace("int b = 2;", "int b = 3;"))
+    monkeypatch.setenv("GISMO_ROOT", str(root))
+    assert cleanup.main(["whitespace"]) == 0
+    out = capsys.readouterr().out
+    assert [l.split("\t")[1] for l in out.splitlines() if l.startswith("SKIP\t")] == ["src/gsCore/x.cpp"]
+    assert out.splitlines()[-1] == \
+        "STATUS: OK 1 files would change, 1 skipped (dry run; pass --apply)", out
+
+
+def test_a7_tree_wide_proof_still_fails_the_run(
+        root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    write(root, "src/gsCore/x.cpp", "int a;  \n")
+    commit_all(root)
+    monkeypatch.setattr(cleanup, "proof", lambda repo, files, verify: (False, ["x: boom"]))
+    rc, out = _apply_in_process(root, monkeypatch, "whitespace", capsys)
     assert rc == 1 and out.splitlines()[-1] == "STATUS: FAIL proof", out
+    assert "OFFENDER\tx: boom" in out
 
 
 def test_a7_whitespace_proof_passes_for_real_pass(
@@ -495,31 +532,32 @@ def test_a7_whitespace_proof_passes_for_real_pass(
 DX_SRC = "/// \\brief Demo\n/// \\code\n/// \\note literal\n/// \\endcode\nint f();\n"
 
 
-def test_a7_doxygen_proof_fails_on_rewrite_inside_a_block(
+def test_a7_doxygen_proof_refuses_rewrite_inside_a_block(
         root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     write(root, "src/gsCore/x.h", DX_SRC)
     commit_all(root)
     _faulty(monkeypatch, "doxygen", lambda t: t.replace("\\note literal", "@note literal"))
     rc, out = _apply_in_process(root, monkeypatch, "doxygen-tags", capsys)
-    assert rc == 1 and out.splitlines()[-1] == "STATUS: FAIL proof", out
+    _assert_refused(root, "src/gsCore/x.h", DX_SRC, rc, out)
 
 
-def test_a7_doxygen_proof_fails_on_rewrite_in_code_or_literal(
+def test_a7_doxygen_proof_refuses_rewrite_in_code_or_literal(
         root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-    write(root, "src/gsCore/x.h", '/// \\brief Demo\nconst char *s = "\\note x";\nint f();\n')
+    text = '/// \\brief Demo\nconst char *s = "\\note x";\nint f();\n'
+    write(root, "src/gsCore/x.h", text)
     commit_all(root)
     _faulty(monkeypatch, "doxygen", lambda t: t.replace('"\\note x"', '"@note x"'))
     rc, out = _apply_in_process(root, monkeypatch, "doxygen-tags", capsys)
-    assert rc == 1 and out.splitlines()[-1] == "STATUS: FAIL proof", out
+    _assert_refused(root, "src/gsCore/x.h", text, rc, out)
 
 
-def test_a7_doxygen_proof_fails_on_other_edit(
+def test_a7_doxygen_proof_refuses_other_edit(
         root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     write(root, "src/gsCore/x.h", DX_SRC)
     commit_all(root)
     _faulty(monkeypatch, "doxygen", lambda t: t.replace("Demo", "Demx"))
     rc, out = _apply_in_process(root, monkeypatch, "doxygen-tags", capsys)
-    assert rc == 1 and out.splitlines()[-1] == "STATUS: FAIL proof", out
+    _assert_refused(root, "src/gsCore/x.h", DX_SRC, rc, out)
 
 
 def test_a7_doxygen_proof_passes_for_real_pass(
@@ -724,13 +762,59 @@ DX_PIECES = [
     "/** \\f$ a */", "/** \\ref z */", "/*! \\f$\n \\ref q */", "/**\n * \\f[\n * \\ref w\n */",
     "/* \\ref no */", 'const char *s = "\\ref";', "/// \\f$ a \\f$ \\ref d",
     "/// \\verbatim", "/// \\endverbatim", "/// \\f{align}{ x", "/// \\f}",
+    "/// \\f$ a \\", "//! x \\", "/// \\f[ a \\\\", "", "", "@code", "@endcode",
+    "/// @code", "/// @endcode", "/** \\f$ a\n\n \\ref b */", "/**\n\n * \\ref x\n */",
+    "/* x\n y */", "/// \\ref k \\f$", 'auto s = R"(\n/// \\f$\n)";', "///< \\f] \\ref p",
+]
+
+#: Separators between pieces: LF, CRLF, a blank line, and two pieces on one line.
+DX_JOINS = ["\n", "\n", "\r\n", "\n\n", "\r\n\r\n", " "]
+
+#: Inputs on which the two lexers legitimately disagree about where a comment is: an unbalanced
+#: quote before a ``///`` and an unterminated ``/**``.
+DX_DISAGREEING = [
+    "#error don't /// \\f$\n/// \\ref b\n",
+    'x"; /// \\f$\n/// \\ref b\n',
+    "/// \\ref a\nwe don't /// \\f$\n/// \\ref b\n",
+    "/** \\ref a\n * \\ref b\n",
 ]
 
 
 def test_rewrite_and_proof_agree_on_random_comment_sequences() -> None:
     import random
     rng = random.Random(20240607)
-    for _ in range(400):
-        old = "\n".join(rng.choice(DX_PIECES) for _ in range(rng.randint(2, 8))) + "\n"
+    for _ in range(1500):
+        pieces = [rng.choice(DX_PIECES) for _ in range(rng.randint(2, 8))]
+        old = pieces[0]
+        for p in pieces[1:]:
+            old += rng.choice(DX_JOINS) + p
+        old += "\n"
         new, _ = cleanup.rewrite_doxygen_tags(old)
         assert cleanup.verify_doxygen_rewrite(old, new) == [], old
+
+
+def test_continued_comment_before_empty_line_is_one_comment_block(root: Path) -> None:
+    text = "/// \\f$ a \\\n\n/// \\f$ \\ref b\n"
+    write(root, "src/gsCore/x.h", text)
+    commit_all(root)
+    r = cleanup_run(root, "doxygen-tags", "--apply")
+    assert r.returncode == 0, r.stdout
+    assert (root / "src/gsCore/x.h").read_text() == "/// \\f$ a \\\n\n/// \\f$ @ref b\n"
+    assert "STATUS: OK 1 files changed" in r.stdout.splitlines(), r.stdout
+    assert any(l.startswith("PROOF") and l.endswith("pass") for l in r.stdout.splitlines())
+
+
+@pytest.mark.parametrize("text", DX_DISAGREEING)
+def test_file_on_which_the_lexers_disagree_is_not_written(root: Path, text: str) -> None:
+    write(root, "src/gsCore/x.h", text)
+    commit_all(root)
+    for args in (("doxygen-tags",), ("doxygen-tags", "--apply")):
+        r = cleanup_run(root, *args)
+        assert r.returncode == 0, r.stdout
+        rows = [l.split("\t") for l in r.stdout.splitlines() if l.startswith("SKIP\t")]
+        assert [x[1] for x in rows] == ["src/gsCore/x.h"] and rows[0][2], r.stdout
+        assert "FAIL" not in r.stdout
+        status = [l for l in r.stdout.splitlines() if l.startswith("STATUS:")]
+        assert len(status) == 1 and ", 1 skipped" in status[0], r.stdout
+        assert (root / "src/gsCore/x.h").read_text() == text
+    assert git(root, "status", "--porcelain", "--untracked-files=no") == ""

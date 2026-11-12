@@ -286,6 +286,11 @@ def parse_budget(budget_path: Path, root: str) -> Budget:
             if GLOB_CHARS.search(a.split("/", 1)[0]):
                 raise Failure(f"line {no}: allow '{written}' must begin with a directory name, "
                               f"not a wildcard: a glob over the whole tree is no budget")
+            if GLOB_CHARS.search(a):
+                try:
+                    re.compile(glob_to_regex(a), re.DOTALL)
+                except re.error as e:
+                    raise Failure(f"line {no}: allow '{written}' is not a valid glob: {e}")
             budget.allows.append(a)
         else:
             raise Failure(f"line {no}: unknown row kind '{kind}'")

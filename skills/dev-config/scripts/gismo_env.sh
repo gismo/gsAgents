@@ -157,7 +157,9 @@ _gismo_env_resolve() {
     #   2. compile_commands.json: -DNDEBUG on the entries whose file lies under
     #      <root>/src (external libraries and files outside the root are ignored):
     #      1 if all carry it, 0 if none does, unknown if they disagree or there are none.
-    # A non-empty CMAKE_BUILD_TYPE alone gives 0 when compile_commands.json is absent.
+    # A cache that names a build type and whose flags are read without -DNDEBUG gives 0
+    # when compile_commands.json is absent; flags that cannot be read (no python3, an
+    # unbalanced quote) leave the answer to compile_commands.json, else unknown.
     # A pre-set GISMO_BUILD_TYPE / GISMO_NDEBUG wins, like the other variables.
     if [ -z "${GISMO_BUILD_TYPE:-}" ] || [ -z "${GISMO_NDEBUG:-}" ]; then
         local cache="$GISMO_BUILD_DIR/CMakeCache.txt" btype="" flags="" tflags="" nd="unknown"
@@ -168,8 +170,11 @@ _gismo_env_resolve() {
         fi
         # -DNDEBUG may also come from add_definitions() and appear only in the compile
         # commands, so the cache alone settles the answer only when it says 1.
-        [ -n "$btype" ] && nd=0
-        [ "$(_gismo_ndebug flags "$flags $tflags")" = 1 ] && nd=1
+        # A cache whose flags cannot be read (no python3, unbalanced quote) says nothing.
+        case "$(_gismo_ndebug flags "$flags $tflags")" in
+            1) nd=1 ;;
+            0) [ -n "$btype" ] && nd=0 ;;
+        esac
         if [ "$nd" != 1 ] && [ -s "$GISMO_BUILD_DIR/compile_commands.json" ]; then
             nd="$(_gismo_ndebug cc "$GISMO_BUILD_DIR/compile_commands.json" "$GISMO_ROOT")"
         fi

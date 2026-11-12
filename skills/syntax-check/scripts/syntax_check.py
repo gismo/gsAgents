@@ -5,7 +5,9 @@ Usage: syntax_check.py [--allow-degraded] [--base <ref>] <file> [<file> ...]
 
 --base <ref>: a header is also "new" when it does not exist at the merge base of
 <ref> and HEAD in its own repository (covers headers added by commits on the branch).
-A header that git detects as a rename of a file present at the merge base is not new.
+A header that git detects as a rename of a file present at the merge base is not new,
+whether the rename is committed or only staged; without --base a staged rename is not
+new either. <ref> must be a ref, not an option.
 A <ref> that does not resolve in that repository (or has no merge base with HEAD)
 falls back to the git-status test, with one stderr line per repository and ref.
 
@@ -231,12 +233,20 @@ def forced_include_missing(stderr: str) -> bool:
 
 def _git_out(cwd: str, *args: str) -> Optional[str]:
     """Stripped stdout of ``git -C cwd args``, or None if git fails or is missing."""
+    res = _git_bytes(cwd, *args)
+    return os.fsdecode(res).strip() if res is not None else None
+
+
+def _git_bytes(cwd: str, *args: str) -> Optional[bytes]:
+    """Raw stdout of ``git -C cwd args``, or None if git fails or is missing.
+
+    Git prints file names as the bytes they have on disk; they need not be valid UTF-8.
+    """
     try:
-        res = subprocess.run(["git", "-C", cwd, *args],
-                             capture_output=True, text=True)
+        res = subprocess.run(["git", "-C", cwd, *args], capture_output=True)
     except OSError:
         return None
-    return res.stdout.strip() if res.returncode == 0 else None
+    return res.stdout if res.returncode == 0 else None
 
 
 _UNRESOLVED_REPORTED: set = set()
@@ -253,27 +263,58 @@ def _report_unresolved_base(top: str, base: str) -> None:
 
 
 def renamed_paths(d: str, mb: str) -> Optional[set]:
-    """Paths (relative to the repository top) that are renames between ``mb`` and ``HEAD``.
+    """Paths (relative to the repository top) that are renames between ``mb`` and the index.
 
-    Parsed from NUL-separated ``git diff -M --name-status -z`` output, so paths with
-    spaces or other special characters are exact. Copies (``C``) and adds (``A``)
-    are not included. None if git fails.
+    The index holds everything committed since ``mb`` plus what is staged. Parsed from
+    NUL-separated ``git diff -M --cached --name-status -z`` output, so paths with
+    spaces or other special characters are exact; the paths are returned as bytes
+    (compare with ``os.fsencode``) because file names need not be valid UTF-8. Copies
+    (``C``) and adds (``A``) are not included. None if git fails or its output cannot
+    be parsed.
     """
-    out = _git_out(d, "diff", "-M", "--name-status", "-z", mb, "HEAD")
+    out = _git_bytes(d, "diff", "-M", "--cached", "--name-status", "-z", mb)
     if out is None:
         return None
-    fields = out.split("\0")
+    fields = out.split(b"\0")
+    if fields and fields[-1] == b"":
+        fields.pop()
     renamed, i = set(), 0
     while i < len(fields):
-        status = fields[i]
-        if status[:1] in ("R", "C"):
+        status = fields[i][:1]
+        if status in (b"R", b"C"):
             # status, old path, new path
-            if status[:1] == "R" and i + 2 < len(fields):
+            if i + 2 >= len(fields):
+                return None
+            if status == b"R":
                 renamed.add(fields[i + 2])
             i += 3
         else:
+            if i + 1 >= len(fields):
+                return None
             i += 2
     return renamed
+
+
+def staged_rename_target(d: str, rel: str) -> bool:
+    """True if the index renames some path to ``rel`` (a repository-relative path).
+
+    Read from ``git status --porcelain=v1 -z`` over the whole repository: limited to
+    the new path, git cannot pair it with the old one and reports an add.
+    """
+    out = _git_bytes(d, "status", "--porcelain=v1", "-z", "--untracked-files=no")
+    if out is None:
+        return False
+    fields = out.split(b"\0")
+    target, i = os.fsencode(rel), 0
+    while i < len(fields):
+        entry = fields[i]
+        if len(entry) < 4:
+            i += 1
+            continue
+        if entry[:1] == b"R" and entry[3:] == target:
+            return True
+        i += 2 if entry[:1] in (b"R", b"C") or entry[1:2] in (b"R", b"C") else 1
+    return False
 
 
 def absent_at_base(path: str, base: str) -> bool:
@@ -297,13 +338,13 @@ def absent_at_base(path: str, base: str) -> bool:
     rel = os.path.relpath(os.path.realpath(ap), os.path.realpath(top))
     try:
         res = subprocess.run(["git", "-C", d, "cat-file", "-e", "%s:%s" % (mb, rel)],
-                             capture_output=True, text=True)
+                             capture_output=True)
     except OSError:
         return False
     if res.returncode == 0:
         return False
     renamed = renamed_paths(d, mb)
-    return renamed is not None and rel not in renamed
+    return renamed is not None and os.fsencode(rel) not in renamed
 
 
 def is_new_file(path: str, base: str = "") -> bool:
@@ -319,18 +360,19 @@ def is_new_file(path: str, base: str = "") -> bool:
     :param base: ref to compare against, or ``""`` for the status-only test.
     """
     ap = os.path.abspath(path)
-    try:
-        res = subprocess.run(
-            ["git", "-C", os.path.dirname(ap), "status", "--porcelain=v1",
-             "--untracked-files=all", "--", os.path.basename(ap)],
-            capture_output=True, text=True)
-    except OSError:
+    d = os.path.dirname(ap)
+    status = _git_bytes(d, "status", "--porcelain=v1", "--untracked-files=all", "--",
+                        os.path.basename(ap))
+    if status is None:
         return False
-    if res.returncode != 0:
-        return False
-    if any(line[:2] == "??" or line[:1] == "A" or line[1:2] == "A"
-           for line in res.stdout.splitlines()):
+    lines = status.splitlines()
+    if any(line[:2] == b"??" for line in lines):
         return True
+    if any(line[:1] == b"A" or line[1:2] == b"A" for line in lines):
+        top = _git_out(d, "rev-parse", "--show-toplevel")
+        rel = os.path.relpath(os.path.realpath(ap), os.path.realpath(top)) if top else None
+        if rel is None or not staged_rename_target(d, rel):
+            return True
     return bool(base) and absent_at_base(path, base)
 
 
@@ -412,15 +454,16 @@ def main():
         a = args[i]
         if a == "--allow-degraded":
             allow_degraded = True
-        elif a == "--base":
-            if i + 1 >= len(args):
+        elif a == "--base" or a.startswith("--base="):
+            if a == "--base":
+                i += 1
+                base = args[i] if i < len(args) else ""
+            else:
+                base = a[len("--base="):]
+            if not base or base.startswith("-"):
                 sys.stderr.write("syntax_check: --base needs a ref\n")
                 print("STATUS: FAIL")
                 sys.exit(2)
-            i += 1
-            base = args[i]
-        elif a.startswith("--base="):
-            base = a[len("--base="):]
         else:
             files.append(a)
         i += 1

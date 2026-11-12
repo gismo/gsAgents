@@ -277,6 +277,40 @@ def test_cache_ndebug_reads_flags_as_tokens(tmp_path: Path, cache_flags: str, ex
     assert ndebug(tmp_path, [("src/gsCore/gsA.cpp", False)], cache) == expected
 
 
+def cache_only_tree(tmp_path: Path, cache_flags: str) -> Path:
+    """Tree whose cache sets ``-DNDEBUG`` in the release flags and whose compile_commands.json is empty."""
+    root = make_tree(tmp_path)
+    write(root / "build/CMakeCache.txt",
+          f"CMAKE_BUILD_TYPE:STRING=Release\nCMAKE_CXX_FLAGS_RELEASE:STRING={cache_flags}\n")
+    write(root / "build/compile_commands.json", "")
+    return root
+
+
+def test_unbalanced_quote_in_cache_flags_without_compile_commands_is_unknown(tmp_path: Path) -> None:
+    root = cache_only_tree(tmp_path, '-DFOO="unbalanced -DNDEBUG')
+    assert env_probe(root, 'gismo_env; echo "$GISMO_NDEBUG"') == ["unknown"]
+
+
+def test_balanced_cache_flags_without_ndebug_stay_zero_without_compile_commands(tmp_path: Path) -> None:
+    root = cache_only_tree(tmp_path, "-O3")
+    assert env_probe(root, 'gismo_env; echo "$GISMO_NDEBUG"') == ["0"]
+
+
+def test_missing_python3_without_compile_commands_is_unknown(tmp_path: Path) -> None:
+    root = cache_only_tree(tmp_path, "-O3 -DNDEBUG")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("grep", "tr", "dirname", "nproc"):
+        os.symlink(shutil.which(name), tools / name)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GISMO_")}
+    env["PATH"] = str(tools)
+    res = subprocess.run([shutil.which("bash"), "-c",
+                          f'source "{GISMO_ENV}"; cd "{root}"; gismo_env; echo "$GISMO_NDEBUG"'],
+                         capture_output=True, text=True, env=env)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.split("\n")[:-1] == ["unknown"]
+
+
 # --- --base ---------------------------------------------------------------------------------
 
 def run_check_base(root: Path, base: str, *files: Path) -> subprocess.CompletedProcess:
@@ -366,7 +400,7 @@ def test_base_rename_to_path_with_space_is_not_new(branch_tree: Path) -> None:
     assert res.returncode == 0
 
 
-def test_base_copy_is_still_new(branch_tree: Path) -> None:
+def test_base_added_header_with_content_of_an_existing_one_is_new(branch_tree: Path) -> None:
     copy = write(branch_tree / "src/gsCore/gsCopy.h", NEEDS_GISMO)
     commit_all(branch_tree)
     res = run_check_base(branch_tree, "main", copy)
@@ -374,12 +408,54 @@ def test_base_copy_is_still_new(branch_tree: Path) -> None:
     assert res.returncode == 1
 
 
-def test_base_without_value_is_an_error(branch_tree: Path) -> None:
+def run_check_args(root: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "GISMO_ROOT": str(root), "GISMO_BUILD_DIR": str(root / "build")}
+    return subprocess.run([sys.executable, str(SYNTAX_CHECK), *args],
+                          capture_output=True, text=True, env=env)
+
+
+@pytest.mark.parametrize("extra", [
+    ["--base"], ["--base="], ["--base", "--allow-degraded"], ["--base=", "--allow-degraded"],
+])
+def test_base_without_value_is_an_error(branch_tree: Path, extra: list[str]) -> None:
     h = write(branch_tree / "src/gsCore/gsNew.h", NEEDS_GISMO)
-    env = {**os.environ, "GISMO_ROOT": str(branch_tree),
-           "GISMO_BUILD_DIR": str(branch_tree / "build")}
-    res = subprocess.run([sys.executable, str(SYNTAX_CHECK), str(h), "--base"],
-                         capture_output=True, text=True, env=env)
+    res = run_check_args(branch_tree, str(h), *extra)
     assert res.returncode == 2
-    assert "--base needs a ref" in res.stderr
+    assert "syntax_check: --base needs a ref" in res.stderr
     assert "OK" not in res.stdout and "FAIL " not in res.stdout.replace("STATUS: FAIL", "")
+    assert res.stdout.rstrip().endswith("STATUS: FAIL")
+
+
+def test_base_with_non_utf8_name_elsewhere_in_the_diff(branch_tree: Path) -> None:
+    odd = os.path.join(os.fsencode(str(branch_tree / "src/gsCore")), b"gs\xff.txt")
+    with open(odd, "wb") as fh:
+        fh.write(b"x\n")
+    h = write(branch_tree / "src/gsCore/gsNew.h", NEEDS_GISMO + "int z;\n")
+    renamed = branch_tree / "src/gsCore/gsRenamed.h"
+    (branch_tree / "src/gsCore/gsOld.h").rename(renamed)
+    commit_all(branch_tree)
+    res = run_check_base(branch_tree, "main", h, renamed)
+    assert "Traceback" not in res.stderr, res.stderr
+    assert res.stdout.rstrip().endswith("STATUS: FAIL")
+    assert f"  FAIL {h}  (not self-contained" in res.stdout
+    assert f"  OK   {renamed}  (needs gismo.h)" in res.stdout
+
+
+def test_staged_rename_is_not_new(branch_tree: Path) -> None:
+    git(branch_tree, "mv", "src/gsCore/gsOld.h", "src/gsCore/gsMoved.h")
+    moved = branch_tree / "src/gsCore/gsMoved.h"
+    for res in (run_check(branch_tree, moved), run_check_base(branch_tree, "main", moved)):
+        assert f"  OK   {moved}  (needs gismo.h)" in res.stdout, res.stdout
+        assert res.returncode == 0
+
+
+def test_header_added_next_to_a_staged_rename_is_new(branch_tree: Path) -> None:
+    git(branch_tree, "mv", "src/gsCore/gsOld.h", "src/gsCore/gsMoved.h")
+    added = write(branch_tree / "src/gsCore/gsAdded.h", NEEDS_GISMO + "int z;\n")
+    git(branch_tree, "add", str(added))
+    moved = branch_tree / "src/gsCore/gsMoved.h"
+    for res in (run_check(branch_tree, moved, added),
+                run_check_base(branch_tree, "main", moved, added)):
+        assert f"  OK   {moved}  (needs gismo.h)" in res.stdout, res.stdout
+        assert f"  FAIL {added}  (not self-contained" in res.stdout, res.stdout
+        assert res.returncode == 1
