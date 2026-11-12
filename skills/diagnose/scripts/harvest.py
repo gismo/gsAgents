@@ -450,13 +450,32 @@ def blocked_passage(text: str) -> str:
 
 # Finding header written by the review agents:
 #   ### F<n> | <severity> | <evidence label> | <RULE-ID or -> | <path>:<line>
+# Severity and evidence label are case-insensitive and the space after ``###``
+# is optional; `parse_review_findings` normalises what it captures.
 _FINDING_HEADER_RE = re.compile(
-    r"^###[ \t]+F(\d+)[ \t]*\|[ \t]*(blocker|major|minor|note)[ \t]*\|"
+    r"^###[ \t]*F(\d+)[ \t]*\|[ \t]*(blocker|major|minor|note)[ \t]*\|"
     r"[ \t]*(MEASURED|REASONED|UNVERIFIED)[ \t]*\|[ \t]*([^|\n]*?)[ \t]*\|"
     r"[ \t]*(.*?)[ \t]*$",
-    re.MULTILINE,
+    re.MULTILINE | re.IGNORECASE,
 )
 _FINDINGS_TOTAL_RE = re.compile(r"^FINDINGS:\s*(\d+)\b.*$", re.MULTILINE)
+# Closing line of a finding file:
+# ``FINDINGS: <n> (blocker <b>, major <m>, minor <k>, note <j>)``.
+_FINDINGS_DECLARED_RE = re.compile(
+    r"^FINDINGS:[ \t]*(\d+)[ \t]*\([ \t]*blocker[ \t]+(\d+),[ \t]*major[ \t]+(\d+),"
+    r"[ \t]*minor[ \t]+(\d+),[ \t]*note[ \t]+(\d+)[ \t]*\)",
+    re.MULTILINE | re.IGNORECASE,
+)
+# Block header of ``findings/refute.md``:
+# ``### <source file> F<n> | upheld|refuted|undecided``.
+_REFUTE_HEADER_RE = re.compile(
+    r"^###[ \t]*(\S+?)[ \t]+F(\d+)[ \t]*\|[ \t]*(upheld|refuted|undecided)\b",
+    re.MULTILINE | re.IGNORECASE,
+)
+_REFUTE_FILE_NAME = "refute.md"
+# A single rule ID, as the lint line below writes it.
+_RULE_ID_RE = re.compile(r"[A-Z][A-Z0-9]*-[A-Z0-9]+")
+_RULE_LIST_SPLIT_RE = re.compile(r"[,/]")
 _SEVERITY_ORDER: Dict[str, int] = {"blocker": 4, "major": 3, "minor": 2, "note": 1}
 _REVIEW_SUMMARY_NAME = "review.md"
 _REVIEW_DIR_GLOB = "*/review/*"
@@ -466,8 +485,9 @@ _REVIEW_LINT_NAME = "input/lint.tsv"
 # Script-decided findings: ``<path>:<line>\t<RULE-ID>\t<severity>\t<message>``. The
 # ``SKIP``, ``STAT`` and ``STATUS:`` lines of the same file do not match.
 _LINT_LINE_RE = re.compile(
-    r"^(?P<loc>[^\t]+:\d+)\t(?P<rule>[A-Z][A-Z0-9]*-[A-Z0-9]+)\t"
-    r"(?P<sev>blocker|major|minor|note)\t(?P<msg>.*)$"
+    r"^(?P<loc>[^\t]+:\d+)\t(?P<rule>[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+)\t"
+    r"(?P<sev>blocker|major|minor|note)\t(?P<msg>.*)$",
+    re.IGNORECASE,
 )
 
 
@@ -478,9 +498,12 @@ class ReviewFinding:
     :ivar number: the ``F<n>`` number within its file.
     :ivar severity: ``blocker``, ``major``, ``minor`` or ``note``.
     :ivar evidence: ``MEASURED``, ``REASONED`` or ``UNVERIFIED``.
-    :ivar rule_id: the RULE-ID, or ``-`` when the finding has none.
+    :ivar rule_id: the RULE-ID, ``-`` when the finding has none, or the IDs joined
+        by ``, `` when the header names several.
     :ivar location: ``<path>:<line>`` as written in the header.
     :ivar what: the text after ``What:`` (first paragraph), or ``""``.
+    :ivar rule_ids: the individual RULE-IDs, upper-cased; ``["-"]`` when the rule
+        field is empty, ``-`` or not made of valid IDs.
     """
 
     number: int
@@ -489,6 +512,27 @@ class ReviewFinding:
     rule_id: str
     location: str
     what: str
+    rule_ids: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.rule_ids:
+            self.rule_ids = [self.rule_id]
+
+
+def normalize_rule_field(raw: str) -> List[str]:
+    """Reduce a finding's rule field to a list of RULE-IDs.
+
+    A comma- or slash-separated list of valid IDs yields each ID, upper-cased;
+    an empty field, ``-``, free text, or a list holding anything that is not an
+    ID yields ``["-"]`` (no rule).
+
+    :param raw: the rule field as written.
+    :returns: the IDs, in order and without repeats, or ``["-"]``.
+    """
+    parts = [p.strip().upper() for p in _RULE_LIST_SPLIT_RE.split(raw)]
+    if not all(_RULE_ID_RE.fullmatch(p) for p in parts):
+        return ["-"]
+    return list(dict.fromkeys(parts))
 
 
 def parse_review_findings(text: str) -> List[ReviewFinding]:
@@ -508,17 +552,70 @@ def parse_review_findings(text: str) -> List[ReviewFinding]:
         body = text[m.end() : end]
         what_m = re.search(r"^What:[ \t]*(.*?)(?:\n\s*\n|\nEvidence:|\nDirection:|\Z)", body, re.MULTILINE | re.DOTALL)
         what = " ".join(what_m.group(1).split()) if what_m else ""
+        rule_ids = normalize_rule_field(m.group(4))
         findings.append(
             ReviewFinding(
                 number=int(m.group(1)),
-                severity=m.group(2),
-                evidence=m.group(3),
-                rule_id=m.group(4).strip() or "-",
+                severity=m.group(2).lower(),
+                evidence=m.group(3).upper(),
+                rule_id=", ".join(rule_ids),
                 location=m.group(5).strip(),
                 what=what,
+                rule_ids=rule_ids,
             )
         )
     return findings
+
+
+def _count_by_severity(findings: List[ReviewFinding]) -> Tuple[int, int, int, int]:
+    """Counts of (blocker, major, minor, note) among `findings`."""
+    counts = [sum(f.severity == sev for f in findings) for sev in ("blocker", "major", "minor", "note")]
+    return counts[0], counts[1], counts[2], counts[3]
+
+
+def check_declared_counts(name: str, text: str, findings: List[ReviewFinding]) -> Optional[str]:
+    """Compare a finding file's closing ``FINDINGS:`` line with what was parsed.
+
+    :param name: the file name or path, quoted in the message.
+    :param text: the file content.
+    :param findings: what `parse_review_findings` returned for `text`.
+    :returns: a warning naming the file, the declared and the parsed counts, or
+        ``None`` when they agree.
+    """
+    declared = list(_FINDINGS_DECLARED_RE.finditer(mask_fences(text)))
+    parsed = _count_by_severity(findings)
+    parsed_txt = (
+        f"{len(findings)} (blocker {parsed[0]}, major {parsed[1]}, minor {parsed[2]}, note {parsed[3]})"
+    )
+    if not declared:
+        return f"{name}: no FINDINGS line found, parsed {parsed_txt}"
+    m = declared[-1]
+    total = int(m.group(1))
+    sev = (int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+    if total == len(findings) and sev == parsed:
+        return None
+    return (
+        f"{name}: declared {total} (blocker {sev[0]}, major {sev[1]}, minor {sev[2]}, "
+        f"note {sev[3]}), parsed {parsed_txt}"
+    )
+
+
+def parse_refute_verdicts(text: str) -> Dict[Tuple[str, int], str]:
+    """Parse ``findings/refute.md`` into ``{(source file stem, n): verdict}``.
+
+    The source file is matched without directory and without ``.md``, lower-cased;
+    the verdict is ``upheld``, ``refuted`` or ``undecided``.
+
+    :param text: the file content.
+    :returns: the verdict of each marked finding.
+    """
+    out: Dict[Tuple[str, int], str] = {}
+    for m in _REFUTE_HEADER_RE.finditer(mask_fences(text)):
+        stem = m.group(1).replace("\\", "/").rsplit("/", 1)[-1]
+        if stem.lower().endswith(".md"):
+            stem = stem[:-3]
+        out[(stem.lower(), int(m.group(2)))] = m.group(3).lower()
+    return out
 
 
 def parse_lint_findings(text: str) -> List[ReviewFinding]:
@@ -539,9 +636,9 @@ def parse_lint_findings(text: str) -> List[ReviewFinding]:
         findings.append(
             ReviewFinding(
                 number=len(findings) + 1,
-                severity=m.group("sev"),
+                severity=m.group("sev").lower(),
                 evidence="MEASURED",
-                rule_id=m.group("rule"),
+                rule_id=m.group("rule").upper(),
                 location=m.group("loc"),
                 what=m.group("msg").strip(),
             )
@@ -595,7 +692,25 @@ def iter_review_dirs(roots: Iterable[Path]) -> Iterator[Path]:
                 yield review_dir
 
 
-def _harvest_reviews(roots: List[Path], since: Optional[date]) -> List[Record]:
+@dataclass
+class ReviewDiagnostics:
+    """Problems found while reading review output, reported in the summary.
+
+    :ivar warnings: one line per finding file whose closing ``FINDINGS:`` line
+        disagrees with what was parsed.
+    :ivar refuted_excluded: findings left out of the records because
+        ``findings/refute.md`` marks them ``refuted``.
+    """
+
+    warnings: List[str] = field(default_factory=list)
+    refuted_excluded: int = 0
+
+
+def _harvest_reviews(
+    roots: List[Path],
+    since: Optional[date],
+    diagnostics: Optional[ReviewDiagnostics] = None,
+) -> List[Record]:
     """Extract one ``review-run`` record per review directory and one
     ``review-finding`` record per finding.
 
@@ -608,8 +723,12 @@ def _harvest_reviews(roots: List[Path], since: Optional[date]) -> List[Record]:
     :param roots: directories to scan.
     :param since: only directories whose ``review.md`` (or, failing that, the
         last finding or lint file) is modified on/after this date are considered.
-    :returns: the extracted records.
+    :param diagnostics: receives declared-count warnings and the number of
+        refuted findings left out.
+    :returns: the extracted records. A finding naming several RULE-IDs gives one
+        record per ID; one marked ``refuted`` in ``findings/refute.md`` gives none.
     """
+    diag = diagnostics if diagnostics is not None else ReviewDiagnostics()
     records: List[Record] = []
     for review_dir in iter_review_dirs(roots):
         summary = review_dir / _REVIEW_SUMMARY_NAME
@@ -646,34 +765,52 @@ def _harvest_reviews(roots: List[Path], since: Optional[date]) -> List[Record]:
             )
         )
 
+        refute_file = review_dir / "findings" / _REFUTE_FILE_NAME
+        verdicts: Dict[Tuple[str, int], str] = {}
+        if refute_file.is_file():
+            verdicts = parse_refute_verdicts(
+                refute_file.read_text(encoding="utf-8", errors="replace")
+            )
+
         for finding_file in finding_files:
+            if finding_file.name == _REFUTE_FILE_NAME:
+                continue
             text = finding_file.read_text(encoding="utf-8", errors="replace")
-            parse = parse_lint_findings if finding_file == lint_file else parse_review_findings
-            for f in parse(text):
-                key = (
-                    f.rule_id
-                    if f.rule_id != "-"
-                    else "norule:" + make_class_key(f.what or f.location)
-                )
-                records.append(
-                    Record(
-                        kind="review-finding",
-                        class_key=key,
-                        text=f"{f.rule_id} | {f.severity} | {f.evidence} | {f.location}: {f.what}",
-                        source_path=str(finding_file),
-                        timestamp=iso_mtime(finding_file),
-                        run_slug=run_slug,
-                        run_id=run_id,
-                        git_branch=branch,
-                        extra={
-                            "rule_id": f.rule_id,
-                            "severity": f.severity,
-                            "evidence": f.evidence,
-                            "location": f.location,
-                            "agent_file": finding_file.name,
-                        },
+            is_lint = finding_file == lint_file
+            parsed_findings = parse_lint_findings(text) if is_lint else parse_review_findings(text)
+            if not is_lint:
+                warning = check_declared_counts(str(finding_file), text, parsed_findings)
+                if warning:
+                    diag.warnings.append(warning)
+            for f in parsed_findings:
+                if not is_lint and verdicts.get((finding_file.stem.lower(), f.number)) == "refuted":
+                    diag.refuted_excluded += 1
+                    continue
+                for rule_id in f.rule_ids:
+                    key = (
+                        rule_id
+                        if rule_id != "-"
+                        else "norule:" + make_class_key(f.what or f.location)
                     )
-                )
+                    records.append(
+                        Record(
+                            kind="review-finding",
+                            class_key=key,
+                            text=f"{f.rule_id} | {f.severity} | {f.evidence} | {f.location}: {f.what}",
+                            source_path=str(finding_file),
+                            timestamp=iso_mtime(finding_file),
+                            run_slug=run_slug,
+                            run_id=run_id,
+                            git_branch=branch,
+                            extra={
+                                "rule_id": rule_id,
+                                "severity": f.severity,
+                                "evidence": f.evidence,
+                                "location": f.location,
+                                "agent_file": finding_file.name,
+                            },
+                        )
+                    )
     return records
 
 
@@ -1271,7 +1408,9 @@ def _harvest_memory(roots: List[Path], since: Optional[date]) -> List[Record]:
 
 
 def build_records(
-    roots: List[Path], since: Optional[date]
+    roots: List[Path],
+    since: Optional[date],
+    diagnostics: Optional[ReviewDiagnostics] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Record], Dict[str, Dict[str, int]]]:
     """Walk `roots` and extract every record across the four parsers.
 
@@ -1284,7 +1423,7 @@ def build_records(
         for `conventions.tsv`, scoped to Required-fixes regions only.
     """
     index_entries, records, conventions_totals = _harvest_run_dirs(roots, since)
-    records.extend(_harvest_reviews(roots, since))
+    records.extend(_harvest_reviews(roots, since, diagnostics))
     records.extend(_harvest_transcripts(roots, since))
     records.extend(_harvest_memory(roots, since))
     return index_entries, records, conventions_totals
@@ -1378,8 +1517,10 @@ def write_summary(
     records: List[Record],
     out_dir: Path,
     since: Optional[date],
+    diagnostics: Optional[ReviewDiagnostics] = None,
 ) -> None:
-    """Write the human-readable `summary.md`."""
+    """Write the human-readable `summary.md`, with a ``## Warnings`` section
+    when `diagnostics` holds any."""
     verdict_totals: Dict[str, int] = {}
     result_totals: Dict[str, int] = {}
     fixups_totals: Dict[str, int] = {}
@@ -1428,10 +1569,20 @@ def write_summary(
             lines.append(
                 f"| {s['rule_id']} | {s['runs']} | {s['findings']} | {s['worst']} | {s['measured']} |"
             )
+    if diagnostics is not None and (ranked or diagnostics.refuted_excluded):
+        lines.append("")
+        lines.append(f"Findings excluded as refuted: {diagnostics.refuted_excluded}")
+    if diagnostics is not None and diagnostics.warnings:
+        lines.append("")
+        lines.append("## Warnings")
+        lines.append("")
+        lines.extend(f"- {w}" for w in diagnostics.warnings)
     (out_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def harvest(roots: List[Path], out_dir: Path, since: Optional[date] = None) -> None:
+def harvest(
+    roots: List[Path], out_dir: Path, since: Optional[date] = None
+) -> ReviewDiagnostics:
     """Run the full extraction pipeline and write every output file.
 
     Parameters
@@ -1442,15 +1593,22 @@ def harvest(roots: List[Path], out_dir: Path, since: Optional[date] = None) -> N
         Destination directory; created if missing.
     since : datetime.date, optional
         Only consider artifacts (files) whose mtime is on/after this date.
+
+    Returns
+    -------
+    ReviewDiagnostics
+        The warnings also written to `summary.md`.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     slices_dir = out_dir / "slices"
-    index_entries, records, conventions_totals = build_records(roots, since)
+    diagnostics = ReviewDiagnostics()
+    index_entries, records, conventions_totals = build_records(roots, since, diagnostics)
     write_index_jsonl(index_entries, out_dir)
     write_slices(records, slices_dir)
     write_conventions_tsv(conventions_totals, slices_dir)
     write_recurrence(records, out_dir)
-    write_summary(index_entries, records, out_dir, since)
+    write_summary(index_entries, records, out_dir, since, diagnostics)
+    return diagnostics
 
 
 # ---------------------------------------------------------------------------
@@ -1503,8 +1661,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     since = datetime.strptime(args.since, "%Y-%m-%d").date() if args.since else None
 
-    harvest(roots, out_dir, since)
+    diagnostics = harvest(roots, out_dir, since)
     print(f"wrote diagnostics to {out_dir}")
+    for warning in diagnostics.warnings:
+        print(f"warning: {warning}")
     return 0
 
 

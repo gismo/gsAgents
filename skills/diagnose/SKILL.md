@@ -53,7 +53,15 @@ run's headline; its blocks restate the others and are never counted as findings.
 worst severity. A RULE-ID that keeps recurring across reviews indicts the rule's wording in
 `CONVENTIONS.md` (unclear or too weak), the lint check behind it, or the agent file that should have
 prevented it. Findings without a RULE-ID are keyed `norule:<slug>` in `recurrence.json` and are not
-ranked in that table: they are candidates for a new rule.
+ranked in that table: they are candidates for a new rule. A finding the refutation pass marked
+`refuted` is left out of the ranking, and the line `Findings excluded as refuted: <n>` beneath the
+table says how many. A finding header that names several rules counts once under each.
+
+The harvest compares what it parsed from each finding file with that file's own closing
+`FINDINGS: <n> (…)` line. A difference, or a missing closing line, is printed as a `warning:` line
+and listed under `## Warnings` in `summary.md`. Read that section before the ranking: a warning
+means findings were written in a form the parser could not read, so the counts for that run are
+too low, and the report says so instead of ranking on them silently.
 
 ## 2. Fan out — cheap models only
 

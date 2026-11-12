@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # review_lint.sh — deterministic style checks on the changed lines of a G+Smo diff.
-# Usage: review_lint.sh [--base <ref>] [--all-lines] [--no-clang-format] [--linters] [<path>...]
+# Usage: review_lint.sh [--base <ref>] [--nested-base optional/<module>=<ref>]... [--all-lines] [--no-clang-format] [--linters] [<path>...]
 # Only the repo root is required; a missing build directory just disables clang-tidy.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

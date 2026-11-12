@@ -21,6 +21,32 @@ _gismo_env_fail() {
 }
 
 gismo_env() {
+    _gismo_env_resolve
+    local rc=$? _v
+    for _v in ${_GISMO_ENV_DERIVED:-}; do
+        printf -v "_GISMO_ENV_VAL_$_v" '%s' "${!_v-}"
+    done
+    return $rc
+}
+
+_gismo_env_resolve() {
+    # --- forget what an earlier call derived ---
+    # Variables this function derived on a previous call are removed, so each call
+    # recomputes them -- but only while they still hold the derived value (kept in
+    # _GISMO_ENV_VAL_<name> by gismo_env). A value assigned in between counts as
+    # pre-set, like one present before the first call.
+    # The record is deliberately not exported: a child shell sees inherited values
+    # as pre-set.
+    local _v _rv
+    for _v in ${_GISMO_ENV_DERIVED:-}; do
+        _rv="_GISMO_ENV_VAL_$_v"
+        [ "${!_v-}" = "${!_rv-}" ] && unset "$_v"
+    done
+    _GISMO_ENV_DERIVED=""
+    for _v in GISMO_ROOT GISMO_BUILD_DIR GISMO_JOBS GISMO_ADVISOR GISMO_BUILD_TYPE GISMO_NDEBUG; do
+        [ -n "${!_v:-}" ] || _GISMO_ENV_DERIVED="$_GISMO_ENV_DERIVED $_v"
+    done
+
     # --- repo root ---
     if [ -z "${GISMO_ROOT:-}" ]; then
         local d="$PWD"
@@ -127,9 +153,10 @@ gismo_env() {
     # -DNDEBUG (CMAKE_CXX_FLAGS_RELWITHDEBINFO is `-O2 -g`), so assertions stay live
     # there although the type looks like a release. Order of evidence:
     #   1. CMakeCache.txt: -DNDEBUG in CMAKE_CXX_FLAGS or CMAKE_CXX_FLAGS_<TYPE>.
-    #   2. compile_commands.json: any -DNDEBUG among the real compile commands.
-    # 1 if either source carries it; 0 if a flag source exists (a non-empty
-    # CMAKE_BUILD_TYPE, or compile_commands.json) and none does; unknown otherwise.
+    #   2. compile_commands.json: -DNDEBUG on the entries whose file lies under
+    #      <root>/src (external libraries and files outside the root are ignored):
+    #      1 if all carry it, 0 if none does, unknown if they disagree or there are none.
+    # A non-empty CMAKE_BUILD_TYPE alone gives 0 when compile_commands.json is absent.
     # A pre-set GISMO_BUILD_TYPE / GISMO_NDEBUG wins, like the other variables.
     if [ -z "${GISMO_BUILD_TYPE:-}" ] || [ -z "${GISMO_NDEBUG:-}" ]; then
         local cache="$GISMO_BUILD_DIR/CMakeCache.txt" btype="" flags="" tflags="" nd="unknown"
@@ -143,7 +170,7 @@ gismo_env() {
         [ -n "$btype" ] && nd=0
         case "$flags $tflags" in *-DNDEBUG*) nd=1 ;; esac
         if [ "$nd" != 1 ] && [ -s "$GISMO_BUILD_DIR/compile_commands.json" ]; then
-            if grep -q -m1 -e '-DNDEBUG' "$GISMO_BUILD_DIR/compile_commands.json" 2>/dev/null; then nd=1; else nd=0; fi
+            nd="$(_gismo_cc_ndebug "$GISMO_BUILD_DIR/compile_commands.json" "$GISMO_ROOT")"
         fi
         [ -z "${GISMO_BUILD_TYPE:-}" ] && GISMO_BUILD_TYPE="${btype:-unknown}"
         [ -z "${GISMO_NDEBUG:-}" ] && GISMO_NDEBUG="$nd"
@@ -151,6 +178,41 @@ gismo_env() {
     case "$GISMO_NDEBUG" in 0|1|unknown) ;; *) GISMO_NDEBUG=unknown ;; esac
     export GISMO_BUILD_TYPE GISMO_NDEBUG
     return 0
+}
+
+# Prints 1, 0 or unknown: whether -DNDEBUG is on the compile commands of the sources
+# under <root>/src in a compile_commands.json ($1). $2 is the root. O(entries).
+_gismo_cc_ndebug() {
+    python3 - "$1" "$2" 2>/dev/null <<'PY' || echo unknown
+import json, os, shlex, sys
+path, root = sys.argv[1], os.path.realpath(sys.argv[2])
+src = os.path.join(root, "src") + os.sep
+
+
+def defines_ndebug(args):
+    """Whether NDEBUG is defined after the last -D/-U of it (-D NDEBUG and -DNDEBUG alike)."""
+    on, i = False, 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-D", "-U") and i + 1 < len(args):
+            a, i = a + args[i + 1], i + 1
+        if a == "-DNDEBUG" or a.startswith("-DNDEBUG="):
+            on = True
+        elif a == "-UNDEBUG":
+            on = False
+        i += 1
+    return on
+
+
+flags = []
+for e in json.load(open(path)):
+    f = os.path.realpath(os.path.join(e.get("directory", ""), e["file"]))
+    if not f.startswith(src):
+        continue
+    args = e["arguments"] if "arguments" in e else shlex.split(e["command"])
+    flags.append(defines_ndebug(args))
+print("unknown" if not flags or any(flags) != all(flags) else int(flags[0]))
+PY
 }
 
 # Value of a CMake cache entry (any type), empty if absent. Entries look like

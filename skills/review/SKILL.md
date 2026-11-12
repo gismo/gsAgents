@@ -23,7 +23,7 @@ This skill has three jobs, chosen by the first argument:
 |---|---|---|---|
 | `light` | lint script, syntax-check, style checker | 1 sonnet | no |
 | `medium` | light + correctness review (which also reads for numerics, tests and docs) | + 1 opus | no |
-| `large` | medium + dedicated numerics review + dedicated tests/docs review + design audit (what the change touches outside the feature's own directory, and whether it had to) + build, filtered tests, changed examples | + 2 opus, 2 sonnet; + 1 opus when the change reaches outside its directory | yes |
+| `large` | medium + dedicated numerics review + dedicated tests/docs review + design audit (what the change touches outside the feature's own directory, and whether it had to) + build, filtered tests, changed examples; debate panel with `--debate` | + 2 opus, 2 sonnet; + 1 opus when the change reaches outside its directory; + 2 or 3 opus with `--debate` | yes |
 | `ultra` | large + full test suite + valgrind + callers outside the diff + refutation of every finding + debate panel + mutation proof | + 2 to 8 opus, 2 sonnet | yes |
 
 **Target.** Nothing: the working diff, including untracked files. A git ref: everything since the merge base with it. `pr <N>`: resolve the PR's base and head with `gh pr view <N> --json baseRefName,headRefName`; the head must be the branch that is checked out — if it is not, stop and say which branch to check out, never check it out yourself. One or more paths: restrict the diff to them.
@@ -34,7 +34,8 @@ The request may carry a question of the user's own ("is this edit worth includin
 
 **Flags.**
 - `--build` at light or medium adds step 3 (build, filtered tests, example runs) and nothing else: no extra reviewer.
-- `--no-build` at large or ultra drops every step that needs a binary; reviewers are dispatched with `run: no` and what they could not execute is reported `REASONED`.
+- Whenever step 3 does not run (light or medium without `--build`, or `--no-build`) and `scope.tsv` lists a changed example, record under **Not checked** that the changed examples were not run with their defaults. That run is the only check of EX-DEFAULT, so without the line a report with no EX-DEFAULT finding would read as if the examples ran.
+- `--no-build` at large or ultra drops every step that needs a binary; reviewers are dispatched with `run: no` and what they could not execute is reported `REASONED`. The mutation proof rebuilds and runs tests, so it is dropped as well and listed under **Not checked**.
 - `--linters` adds clang-tidy and cppcheck where installed.
 - `--debate` turns the debate panel on at large.
 - `--budget <file>` names the feature's intrusion budget when it is not where step 1 looks for it.
@@ -52,20 +53,22 @@ Everything a review produces lives in one directory:
                    intrusion.tsv, and budget-draft.tsv when there is no budget (large, ultra)
   findings/        one file per reviewer
   debate/          topics.md and one file per position
+  run/             working directory of example and valgrind runs
+  mutation/        patches and STATE.md of the mutation proof (ultra)
   logs/            verbatim output of commands that findings quote
 ```
 
 `<slug>` is the slug of the `/gismo:implement` plan this change came from when there is one (its `.claude/plans/<slug>/` already exists), otherwise the branch name. The dated subdirectory keeps each run intact, since a change is usually reviewed again after it is fixed. Call the directory `D`. Shell state does not persist between your Bash calls, so write its literal path in every command.
 
 ```
-mkdir -p D/input D/findings D/debate D/logs
+mkdir -p D/input D/findings D/debate D/logs D/run D/mutation
 bash $S/review_scope.sh [--base <ref>] [<path>…]              > D/input/scope.tsv
 bash $S/review_scope.sh --lines [--base <ref>] [<path>…]      > D/input/lines.tsv
-bash $S/review_lint.sh [--base <ref>] [--linters] [<path>…]   > D/input/lint.tsv
-git diff [<merge base>] | md5sum                               > D/input/diff.md5
+bash $S/review_lint.sh [--base <ref>] [--nested-base <module>=<ref>]… [--linters] [<path>…]   > D/input/lint.tsv
+bash $S/review_scope.sh --digest [--base <ref>] [<path>…]      > D/input/diff.md5
 ```
 
-Redirect stdout only, exactly as written. The scripts print notices on stderr — for instance that `--base` does not apply to a nested repository — and `2>&1` would put them inside the TSV. An input file that came out wrong is regenerated, never edited.
+`--digest` prints one md5 over the status and content of every changed file, untracked files and nested repositories included, which a `git diff | md5sum` at the root would miss. Redirect stdout only, exactly as written. The scripts print notices on stderr — for instance that `--base` does not apply to a nested repository — and `2>&1` would put them inside the TSV. An input file that came out wrong is regenerated, never edited.
 
 The scope script also sees changes inside `optional/` modules that are their own git repositories, which a plain `git diff` at the root does not. If the scope is empty, say so and stop. If it holds more than about 60 files, tell the user the count and ask whether to narrow it before spending anything: a review that large is usually a mistaken target.
 
@@ -89,7 +92,7 @@ With no budget, the feature's home is inferred: the `optional/<module>/` directo
 
 Read the last line of `intrusion.tsv` first: on `STATUS: FAIL` nothing was measured, so record the reason under **Not checked** and dispatch no reviewer for it. Name the home, or homes, on the report's `Home:` line, so the user can see what the audit took the feature to be. A `FILE` row is a changed file outside home; one marked `exempt=yes` is a new example, unit test or documentation file, which is not reach. The audit concerns the rows marked `exempt=no`. With none, the change stays inside its own directory: say so under **Design audit** and dispatch no reviewer for it.
 
-Then run `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <changed C++ files>`, leaving out files whose status in `scope.tsv` is `D`, and keep its output as `D/input/syntax.txt`. A file that does not compile is a `blocker` when the file is new or an error sits on a line listed in `lines.tsv`, and there is no point reviewing the rest at depth until it does: write the report with that one finding and stop. A failure whose errors all sit on lines the change did not touch was there before the change: it is not a finding. Record it under **Build and test** and **Not checked**, with the lines, and go on. A header the script reports as OK but not self-contained, and a file it reports as `SKIP` for want of compile flags (the run then ends `STATUS: INCOMPLETE`), are likewise recorded under **Not checked** and do not stop the review.
+Then run `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh [--base <ref>] <changed C++ files>`, leaving out files whose status in `scope.tsv` is `D`, and keep its output as `D/input/syntax.txt`. Pass `--base` with the ref the scope was given whenever the review compares against one: the script takes a header for new from `git status` alone otherwise, and a header added by a commit on the branch would pass as an existing one. A file that does not compile is a `blocker` when the file is new or an error sits on a line listed in `lines.tsv`, and there is no point reviewing the rest at depth until it does: write the report with that one finding and stop. A failure whose errors all sit on lines the change did not touch was there before the change: it is not a finding. Record it under **Build and test** and **Not checked**, with the lines, and go on. One failure is not a blocker: a new `.h` reported `FAIL … (not self-contained: compiles only with gismo.h force-included)` does compile where it is used, so it is a `major` finding under HD-SELF, `MEASURED`, and the review goes on. A header the script reports as `OK … (needs gismo.h)` whose status in `scope.tsv` is `A` is new all the same (the script could not see it, as in a nested repository with other refs) and is the same `major` finding. An existing header the script reports as `OK … (needs gismo.h)`, and a file it reports as `SKIP` for want of compile flags (the run then ends `STATUS: INCOMPLETE`), are likewise recorded under **Not checked** and do not stop the review.
 
 ## 2. Dispatch reviewers
 
@@ -104,12 +107,12 @@ Dispatch the agents of a step in one message so they run concurrently. Each is g
 | large, ultra | `gismo:task-reviewer` | diff mode, `focus: tests-docs` | `findings/tests-docs.md` |
 | large, ultra, when `input/intrusion.tsv` has a `FILE` row marked `exempt=no` | `gismo:task-reviewer` | diff mode, `focus: intrusion`, with every home and `budget: real` or `budget: draft` | `findings/intrusion.md` |
 
-Every reviewer dispatch also states `run: yes` or `run: no`. When step 3 applies, do it first so the reviewers go out with `run: yes`; the style checker needs no binary and goes out together with the builder.
+Every reviewer dispatch also states `run: yes` or `run: no`. When step 3 applies, do its items 1 to 4 first so the reviewers go out with `run: yes`; the style checker needs no binary and goes out together with the builder. Item 5 of step 3 needs a reviewer's output and comes after this step.
 
 Every `gismo:task-reviewer` brief also states, in these terms, what the agent cannot know from its own file:
-- **The level, and the test budget it implies.** Below ultra a reviewer runs only suites filtered to the changed files. When step 3 ran, it has already run them once: give its result (suites, pass counts), so that a reviewer runs a suite again only to observe a specific attack. The full suite is run at ultra only, and by step 3.
+- **The level, and the test budget it implies.** Below ultra a reviewer runs only suites filtered to the changed files. When step 3 ran, it has already run them once: give its result (suites, pass counts), so that a reviewer runs a suite again only to observe a specific attack. Give the `tests-docs` reviewer the result of each example run as well (exit code and log path), or say that no example was run: it judges EX-DEFAULT from that run and not from reading. The full suite is run at ultra only, and by step 3.
 - **Where scratch goes.** Attack drivers, their binaries and copies of base-revision files go under `/tmp`. `D` receives the reviewer's finding file and the logs `run_logged.sh` writes, nothing else, and the source tree receives nothing.
-- **No git command that writes,** `git fetch` included.
+- **No git command that writes,** `git fetch` included. The one exception is the `mutation` focus, whose brief names the two commands it may use (`git apply -R` and `git apply` on the patch it saved) and nothing beyond them.
 
 ## 3. Build and run (large, ultra, or `--build`)
 
@@ -117,12 +120,12 @@ Delegate; you want the verdict, not the log. What these agents return goes into 
 
 1. `gismo:builder` — the targets the change affects: the library if `src/` changed, each changed example, the unit-test binary if tests or `src/` changed. Derive target names from `scope.tsv`. A build failure is a `blocker`: write the report and stop.
 2. `gismo:unittest-runner` — filtered to the suites covering the changed files; at ultra, no filter.
-3. Each changed example, with no arguments: `bash ${CLAUDE_PLUGIN_ROOT}/skills/evidence-log/scripts/run_logged.sh D <name> timeout 120 <binary>`. A non-zero exit or a timeout (exit 124) is a `major` finding under EX-DEFAULT, citing the log.
+3. Each changed example, with no arguments, run from a scratch directory so that whatever it writes (ParaView files, logs) lands there and not in the source tree: `mkdir -p D/run`, then `bash ${CLAUDE_PLUGIN_ROOT}/skills/evidence-log/scripts/run_logged.sh D <name> timeout 120 bash -c 'cd D/run && exec <absolute path of the binary>'`. A non-zero exit or a timeout (exit 124) is a `major` finding under EX-DEFAULT, citing the log. This run is the only check of EX-DEFAULT.
 
 **ultra only**
 
-4. `gismo:debugger` — each changed example under valgrind with its default arguments.
-5. `gismo:indexer` — "which callers outside these files use these symbols?", with the list under `## Public symbols changed` in `findings/correctness.md`. Give its answer to the refutation pass.
+4. `gismo:debugger` — each changed example under valgrind with its default arguments, with `D/run` as the working directory; say so in the brief.
+5. `gismo:indexer`, once the step 2 reviewers have returned — "which callers outside these files use these symbols?", with the list under `## Public symbols changed` in `findings/correctness.md`. Give its answer to the refutation pass.
 
 ## 4. Refute (ultra)
 
@@ -148,7 +151,7 @@ Do not count votes: the positions were assigned, so agreement among them means n
 
 ## 6. Mutation proof (ultra)
 
-Ask the user before this step, in plain words: it temporarily reverts individual hunks of the change in the working tree, rebuilds, runs the new tests to confirm each one fails without its fix, and restores the files, checking by md5 that they are byte-identical afterwards. Nothing else should be editing the tree meanwhile. On a yes, dispatch `gismo:task-reviewer` in diff mode with `focus: mutation`; it writes `findings/mutation.md`. On a no, skip it and record under **Not checked** that the tests were inspected by reading only.
+Ask the user before this step, in plain words: it temporarily reverts individual hunks of the change in the working tree, rebuilds, runs the new tests to confirm each one fails without its fix, and restores the files, checking by md5 that they are byte-identical afterwards. Nothing else should be editing the tree meanwhile. Tell them where the safety net is before it starts: each reverted hunk is saved as a patch under `D/mutation/`, and `D/mutation/STATE.md` always names the file that is currently reverted and the one command that restores it, so that a session that dies mid-step leaves the way back written down. The brief gives the reviewer the base the review compares against (the merge base of step 1, or `HEAD` for a working-diff review), because the fix it reverts may already be committed. When you next see the review directory and `STATE.md` shows a file still reverted, tell the user at once, with the restore command, before anything else. On a yes, dispatch `gismo:task-reviewer` in diff mode with `focus: mutation`; it writes `findings/mutation.md`. On a no, skip it and record under **Not checked** that the tests were inspected by reading only.
 
 ## 7. Write the report
 
@@ -157,7 +160,7 @@ Ask the user before this step, in plain words: it temporarily reverts individual
 - Keep each agent's severity and evidence label. Lower or drop a finding only for a reason you state.
 - Script findings need no elaboration: group them by rule with a count and the locations. That holds for the `major` and `minor` rows of `lint.tsv`. A `note` row is a prompt the script could not judge (ID-MOVE, ID-INTLOOP on `size_t`, CM-EMPH): it enters the report only as the finding the style checker made of it, and one the style checker passed over is not a finding.
 - Each finding file ends with a `## Checked` section. A line there beginning `Pre-existing:` names a defect that was in the code before the change: copy those lines into the report's **Pre-existing** section. They are not findings, are not triaged and are not counted.
-- A number in the report is the output of a command on its source (`cut -f1 D/input/lint.tsv | sort | uniq -c`, `grep -c` on a log), never a figure retyped from a finding's prose.
+- A number in the report is the output of a command on its source (`awk -F'\t' '$3 ~ /^(major|minor|note)$/ {print $2}' D/input/lint.tsv | sort | uniq -c` for findings per rule — the rule ID is the second field, and the `STAT`, `SKIP` and `STATUS` rows are not findings — or `grep -c` on a log), never a figure retyped from a finding's prose.
 - A finding has one evidence label: that of the weakest claim its direction rests on. Where a reviewer measured one part and reasoned another, split it into two findings, or label the whole `REASONED` and say which part was measured.
 
 **Triage every finding** into one action class. It decides what the resolve step may do with it.
@@ -215,7 +218,7 @@ Then tell the user, in a few lines: the headline counts, the blockers and majors
 
 The order matters: a decision can make smaller findings moot, and edits shift line numbers, so decisions come first and the mechanical batch last. Nothing is changed before the user has said yes to that step, and the reviewers never fix their own findings — fixes go through the implementing agents and their own review.
 
-1. **Check the report is current.** Recompute the diff's md5 as in step 1 and compare with `input/diff.md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
+1. **Check the report is current.** Run `review_scope.sh --digest` with the arguments of step 1 and compare with `input/diff.md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
 2. **Show the triage counts** and name the `info` findings in a line each; nothing is asked about them. Then put the `confirm` findings to the user as one list — a line each, saying what would be changed — and ask once whether to fix them all or which to discuss first. Say in the question that these rest on a reviewer's reading, not on something that was run. Those picked out join the `decision` findings; the rest are recorded as `fix`. Then take the `decision` findings, most severe first, a few at a time. For each, in plain words and without file-and-line detail in the question: what is at stake, what happens under each option, and your recommendation. A debate ruling is the recommendation where there is one, with the argument against it. When the user asks what a finding means instead of answering, explain it — what the code does today and the evidence — and ask again. The user answers:
    - `fix` (and how, where there is a choice);
    - `accept` — the code stays; record why. For a `DS-BUDGET` finding the code can only stay if the budget is widened, so `accept` there is the user widening it: make the four edits listed under "Only the user widens the budget" in `${CLAUDE_PLUGIN_ROOT}/skills/design/SKILL.md`, and record the reason in both places. Say this in the question, so the user knows the answer changes the budget;

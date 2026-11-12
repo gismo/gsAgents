@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """syntax_check.py -- fast per-file compile gate for G+Smo (-fsyntax-only).
 
-Usage: syntax_check.py [--allow-degraded] <file> [<file> ...]
+Usage: syntax_check.py [--allow-degraded] [--base <ref>] <file> [<file> ...]
+
+--base <ref>: a header is also "new" when it does not exist at the merge base of
+<ref> and HEAD in its own repository (covers headers added by commits on the branch).
+A <ref> that does not resolve in that repository falls back to the git-status test.
 
 compile_commands.json in $GISMO_BUILD_DIR is REQUIRED (asserted up front) so every
 file is checked with its real per-target flags -- a submodule file built with
@@ -24,7 +28,8 @@ A file with no flags from any of these is reported "SKIP" and the run continues.
 
 Headers (.h/.hpp) cannot be compiled directly, so they are checked through a
 temporary TU that just #includes them; on failure they get one retry with gismo.h
-force-included (see check_file).
+force-included (see check_file). A new .h file (untracked or added relative to HEAD)
+that compiles only with that retry is a FAIL: it must be self-contained.
 
 Output: per file, one result line followed by that file's diagnostics, all on
 stdout in input order.
@@ -222,14 +227,80 @@ def forced_include_missing(stderr: str) -> bool:
             or "'gismo.h' file not found" in stderr)
 
 
-def check_file(path: str, cc_entries: list, bd: str, allow_degraded: bool) -> str:
+def _git_out(cwd: str, *args: str) -> Optional[str]:
+    """Stripped stdout of ``git -C cwd args``, or None if git fails or is missing."""
+    try:
+        res = subprocess.run(["git", "-C", cwd, *args],
+                             capture_output=True, text=True)
+    except OSError:
+        return None
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
+def absent_at_base(path: str, base: str) -> bool:
+    """True if ``path`` does not exist at the merge base of ``base`` and ``HEAD``.
+
+    Evaluated in the innermost repository containing the file. False when ``base``
+    does not resolve there, when there is no common ancestor, or when git cannot
+    classify the file.
+    """
+    ap = os.path.abspath(path)
+    d = os.path.dirname(ap)
+    top = _git_out(d, "rev-parse", "--show-toplevel")
+    if not top:
+        return False
+    mb = _git_out(d, "merge-base", base, "HEAD")
+    if not mb:
+        return False
+    rel = os.path.relpath(os.path.realpath(ap), os.path.realpath(top))
+    try:
+        res = subprocess.run(["git", "-C", d, "cat-file", "-e", "%s:%s" % (mb, rel)],
+                             capture_output=True, text=True)
+    except OSError:
+        return False
+    return res.returncode != 0
+
+
+def is_new_file(path: str, base: str = "") -> bool:
+    """True if ``path`` is untracked or added relative to ``HEAD`` in its own repository.
+
+    The repository is the innermost one containing the file (the root or a nested
+    ``optional/<module>``). A file outside any repository, or that git cannot
+    classify, is not new. With ``base``, a file is also new when it is absent at the
+    merge base of ``base`` and ``HEAD`` (see :func:`absent_at_base`); a ``base`` that
+    does not resolve in the file's repository leaves the status-only test.
+
+    :param path: file to classify.
+    :param base: ref to compare against, or ``""`` for the status-only test.
+    """
+    ap = os.path.abspath(path)
+    try:
+        res = subprocess.run(
+            ["git", "-C", os.path.dirname(ap), "status", "--porcelain=v1",
+             "--untracked-files=all", "--", os.path.basename(ap)],
+            capture_output=True, text=True)
+    except OSError:
+        return False
+    if res.returncode != 0:
+        return False
+    if any(line[:2] == "??" or line[:1] == "A" or line[1:2] == "A"
+           for line in res.stdout.splitlines()):
+        return True
+    return bool(base) and absent_at_base(path, base)
+
+
+def check_file(path: str, cc_entries: list, bd: str, allow_degraded: bool,
+               base: str = "") -> str:
     """Check one file; print its result line followed by its diagnostics (stdout).
 
     A header is first compiled standalone. Many G+Smo headers rely on the umbrella
     header having been included by the consuming TU, so on failure it is retried
     once with ``gismo.h`` force-included ahead of it. Passing only on the retry is
     reported as OK with a ``(needs gismo.h)`` marker: the header is not
-    self-contained but builds in every real TU. Failing the retry is a genuine FAIL
+    self-contained but builds in every real TU. A new ``.h`` file (see
+    :func:`is_new_file`) must be self-contained: passing only on the retry is a FAIL
+    marked ``(not self-contained: compiles only with gismo.h force-included)``.
+    Failing the retry is a genuine FAIL
     and the retry's diagnostics are shown, unless the retry failed only because
     ``gismo.h`` is not on the borrowed include path; then the standalone
     diagnostics, which describe the header itself, are shown.
@@ -263,11 +334,14 @@ def check_file(path: str, cc_entries: list, bd: str, allow_degraded: bool) -> st
         tu = tmp.name
     marker = ""
     try:
-        res = compile_tu(compiler, flags, workdir, tu)
+        res = first = compile_tu(compiler, flags, workdir, tu)
         if res.returncode != 0 and tmp:
             retry = compile_tu(compiler, flags, workdir, tu, preinclude="gismo.h")
             if retry.returncode == 0:
-                marker = "  (needs gismo.h)"
+                if ext == ".h" and is_new_file(path, base):
+                    marker = "  (not self-contained: compiles only with gismo.h force-included)"
+                else:
+                    marker = "  (needs gismo.h)"
             if retry.returncode == 0 or not forced_include_missing(retry.stderr):
                 res = retry
     finally:
@@ -275,18 +349,32 @@ def check_file(path: str, cc_entries: list, bd: str, allow_degraded: bool) -> st
             os.unlink(tmp.name)
     if note:
         marker += "  (%s)" % note
-    ok = res.returncode == 0
+    ok = res.returncode == 0 and "not self-contained" not in marker
     print("  %s %s%s" % ("OK  " if ok else "FAIL", path, marker))
     if not ok:
-        print(res.stderr[-4000:])
+        print((res.stderr or first.stderr)[-4000:])
     sys.stdout.flush()
     return "ok" if ok else "fail"
 
 
 def main():
     args = sys.argv[1:]
-    allow_degraded = "--allow-degraded" in args
-    files = [a for a in args if a != "--allow-degraded"]
+    allow_degraded = False
+    base = ""
+    files = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--allow-degraded":
+            allow_degraded = True
+        elif a == "--base" and i + 1 < len(args):
+            i += 1
+            base = args[i]
+        elif a.startswith("--base="):
+            base = a[len("--base="):]
+        else:
+            files.append(a)
+        i += 1
     if not files:
         sys.stderr.write(__doc__ or "")
         print("STATUS: FAIL")
@@ -294,7 +382,7 @@ def main():
     bd = build_dir()
     assert_compile_commands(bd, allow_degraded)
     cc = load_compile_commands(bd)
-    results = [check_file(f, cc, bd, allow_degraded) for f in files]
+    results = [check_file(f, cc, bd, allow_degraded, base) for f in files]
     if "fail" in results:
         print("STATUS: FAIL")
         sys.exit(1)

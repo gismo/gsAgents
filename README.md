@@ -185,8 +185,8 @@ The level sets what runs and what it costs:
 |---|---|---|---|
 | `light` | `review_lint.sh`, syntax-check, `gismo:style-checker`; no build | sonnet only | Cheap: seconds of scripts plus one sonnet pass |
 | `medium` | light + one correctness review of the diff; no build | + one opus | One opus pass over the diff |
-| `large` | medium + numerics/performance review, tests/docs review, design audit (the reach outside the feature's own directory is measured, and reviewed when there is any), build of the affected targets, filtered unit tests, changed examples run with their defaults; debate panel with `--debate` | + two opus, two sonnet (builder, test runner); one more opus when the change reaches outside its directory | Several opus passes plus build and test time |
-| `ultra` | large + the full unit-test suite, valgrind via `gismo:debugger` on changed examples, `gismo:indexer` for callers outside the diff, an opus refutation pass over every finding, the debate panel on contested findings, and mutation proof of the new tests after you confirm | + more opus, scaling with the number of findings | The most expensive: use it before a merge, not on every commit |
+| `large` | medium + numerics/performance review, tests/docs review, design audit (the reach outside the feature's own directory is measured, and reviewed when there is any), build of the affected targets, filtered unit tests, changed examples run with their defaults; debate panel with `--debate` | + two opus, two sonnet (builder, test runner); two or three more opus with `--debate`; one more opus when the change reaches outside its directory | Several opus passes plus build and test time |
+| `ultra` | large + the full unit-test suite, valgrind via `gismo:debugger` on changed examples, `gismo:indexer` for callers outside the diff, an opus refutation pass over every finding, the debate panel on contested findings, and mutation proof of the new tests after you confirm | + two to eight opus, scaling with the number of findings, and two sonnet | The most expensive: use it before a merge, not on every commit |
 
 `--build` at light or medium adds the build, the filtered tests and the example runs, and
 no extra reviewer; `--no-build` at large or ultra drops every step that needs a binary (a
@@ -276,8 +276,10 @@ and say something, `gismo:task-reviewer` checks that what they claim is true, an
 rules, and the review never reports old lines. `/gismo:review cleanup whitespace` and
 `/gismo:review cleanup doxygen-tags` (backed by `tree_cleanup.sh`) bring it in line in
 two mechanical passes: a dry run by default, `--apply` only on a clean working tree, and a
-proof afterwards (`git diff -w` shows only whitespace; reversing the `\` to `@`
-substitution reproduces the old blobs exactly). It never commits; add each cleanup commit
+proof afterwards, made by a tokenizer separate from the one that did the rewriting (the
+whitespace pass leaves the token stream equal, with every string and character literal
+byte for byte the same; the tag pass differs from the old blobs only in a `\` that became
+`@` before a doxygen command, outside code and verbatim blocks). It never commits; add each cleanup commit
 to `.git-blame-ignore-revs`. A clang-format pass comes later, with a fitted config.
 
 Cost control rests on an asymmetry: **writing is cheap, checking is expensive.**

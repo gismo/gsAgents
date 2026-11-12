@@ -97,3 +97,5 @@ corpus `skills/diagnose` mines). Three things stood out:
   reviews, mined with `/gismo:diagnose`, is what would justify retuning the levels.
 - `skills/diagnose/scripts/test_harvest.py` has 46 tests (it had 41 at 0.8.0, see
   `DIAGNOSIS-AND-PLAN.md`).
+
+Update 2026-11-12 (review of 0.9.0): section 2 names three triage classes. Commit `071f615` added two, `confirm` and `info`; `skills/review/SKILL.md` section 7 is the current statement.

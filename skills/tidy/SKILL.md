@@ -16,7 +16,9 @@ Default target is the working diff, including untracked files and the nested git
 under `optional/` (a plain `git diff` at the root shows nothing for them):
 `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_scope.sh` lists the files and
 `review_scope.sh --lines` the added or changed line ranges of each. An argument narrows it to a
-path, or compares against a git ref (`--base <ref>`).
+path, or compares against a git ref (`--base <ref>`). `--base` applies to the root repository; an
+optional module that is its own repository is compared with its `HEAD` unless you add
+`--nested-base optional/<module>=<ref>`, so name it when the module's work is already committed.
 **Only ever touch lines that this diff added or modified** — pre-existing comments in a
 file you happen to be editing are somebody else's decision, not yours.
 
@@ -71,7 +73,8 @@ comments here — this pass only removes.
 ## Procedure
 
 1. Collect the target files with `review_scope.sh` and take the deterministic starting list from
-   `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh`: its `CM-NARR`, `CM-LINEREF`,
+   `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh`, given the same path,
+   `--base` and `--nested-base` arguments as the scope so that both look at the same change: its `CM-NARR`, `CM-LINEREF`,
    `CM-DEAD` and `CM-EMPH` findings are the comments a pattern match found on added or changed
    lines. They are candidates, not verdicts: apply the Delete/Keep test to each (a `previously`
    inside a real doxygen contract stays), and apply it to what a regex cannot see — narration in
