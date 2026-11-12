@@ -11,7 +11,7 @@ Every rule has an ID, a severity and a checker.
 
 - **Severity.** `major`: must be fixed before merge. `minor`: should be fixed; cheap.
   `note`: reported for the author's judgement, never counted against the change.
-- **Checker.** `script`: decided by `scripts/review_lint.sh`, with no model involved. `script + style`: the script checks that the thing is present, or reports as a note what it cannot judge, and the style checker decides whether it is right.
+- **Checker.** `script`: decided by `scripts/review_lint.sh`, or for section 9 by the script named there, with no model involved. `script + style`: the script checks that the thing is present, or reports as a note what it cannot judge, and the style checker decides whether it is right.
   `style`: needs reading, done by `gismo:style-checker`. `review`: needs understanding of
   behaviour, done by `gismo:task-reviewer`.
 - **Scope.** A rule applies to lines the change added or modified. Older code in a touched
@@ -173,3 +173,18 @@ All checked by `gismo:task-reviewer`; a finding needs the line and the input tha
 | NU-ALIAS | major | Eigen expressions do not alias: `noalias()` only where the destination does not appear on the right, and no `auto` holding an expression whose operands die. |
 | NU-CAST | major | No narrowing cast of `real_t` to an integer type on a value that can be NaN or out of range. |
 | NU-COMPLEX | minor | A new algorithm states its complexity in the doxygen of its entry point. |
+
+## 9. Reach into the core library
+
+A feature has a `home`: the directory it lives in, an optional module or a directory under
+`src/`. These rules concern what it changes outside home, and are about files, not lines.
+DS-BUDGET applies only to a feature that has an intrusion budget (`budget.tsv`, written by
+`/gismo:design`), the list of files outside home that it may change; it is decided by
+`skills/design/scripts/intrusion.sh check`, which looks at the whole change and not at one
+task's files. DS-REACH applies to any change and is checked by `gismo:task-reviewer` with
+focus `intrusion`.
+
+| ID | Sev | Checker | Rule |
+|---|---|---|---|
+| DS-REACH | major | review | A change outside home is one the feature needs, in the least intrusive form that serves it. Findings: code that serves only this feature placed in a core file; a core class modified where an extension point it already offers would do; a new hook that knows about the feature or forces existing derived classes or callers to change; a default or a result that changes for code which does not use the feature; an include from core into home; an edit unrelated to the feature. Being listed in the budget does not settle it: the budget says the file may change, not that this change is the smallest. |
+| DS-BUDGET | major | script | A change stays inside its budget. Outside the feature's `home` directories and its `allow` rows, no existing file is modified, deleted or renamed, and no file is created under `src/` or `optional/<module>/src/`. New examples, unit tests and documentation are free. The finding is settled by moving the change into home or by the user widening the budget, never by an agent adding an `allow` row. |

@@ -20,7 +20,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:implementer` | sonnet | Library code in `src/`, `optional/*/src` |
 | `gismo:test-writer` | sonnet | UnitTest++ suites |
 | `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
-| `gismo:task-reviewer` | opus | Adversarial per-task gate: PASS / PASS (fix-ups) / FAIL (attacks the change; no routine test re-runs) |
+| `gismo:task-reviewer` | opus | Adversarial per-task gate: PASS / PASS (fix-ups) / FAIL (attacks the change; no routine test re-runs); also the reviewer and debate panelist behind `/gismo:review` and `/gismo:design` |
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → lint gate → review → repair cycles |
 | `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
@@ -173,6 +173,7 @@ after it is fixed without overwriting the first run:
   decisions.md     your answers from the resolve step, which also writes fix-plan.md,
                    handover-R<n>-*.md and comment-R<n>.md
   input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5
+                   budget.tsv (budget check)  intrusion.tsv (design audit)
   findings/        one file per reviewer (style.md, correctness.md, ...)
   debate/          topics.md and one file per position
   logs/            verbatim output of every command a finding quotes
@@ -184,7 +185,7 @@ The level sets what runs and what it costs:
 |---|---|---|---|
 | `light` | `review_lint.sh`, syntax-check, `gismo:style-checker`; no build | sonnet only | Cheap: seconds of scripts plus one sonnet pass |
 | `medium` | light + one correctness review of the diff; no build | + one opus | One opus pass over the diff |
-| `large` | medium + numerics/performance review, tests/docs review, build of the affected targets, filtered unit tests, changed examples run with their defaults; debate panel with `--debate` | + two opus, two sonnet (builder, test runner) | Several opus passes plus build and test time |
+| `large` | medium + numerics/performance review, tests/docs review, design audit (the reach outside the feature's own directory is measured, and reviewed when there is any), build of the affected targets, filtered unit tests, changed examples run with their defaults; debate panel with `--debate` | + two opus, two sonnet (builder, test runner); one more opus when the change reaches outside its directory | Several opus passes plus build and test time |
 | `ultra` | large + the full unit-test suite, valgrind via `gismo:debugger` on changed examples, `gismo:indexer` for callers outside the diff, an opus refutation pass over every finding, the debate panel on contested findings, and mutation proof of the new tests after you confirm | + more opus, scaling with the number of findings | The most expensive: use it before a merge, not on every commit |
 
 `--build` at light or medium adds the build, the filtered tests and the example runs, and
@@ -194,6 +195,55 @@ no-build run reports whatever it would have executed as `REASONED`, and says so 
 no correctness agent lists that under *Not checked* rather than implying a clean bill.
 Findings from past reviews feed `/gismo:diagnose`, which ranks recurring rule IDs so a
 rule that keeps being broken gets reworded.
+
+**Designing before planning: `/gismo:design <feature>`.** A generated feature tends to reach
+further into the core library than it needs to: each step is reasonable where it is taken,
+and after a few iterations core classes and their API have changed. The design skill makes
+that reach a choice. It maps which core classes the feature must touch (`gismo:indexer`,
+`gismo:scout`), proposes two or three interfaces along a ladder — module only, an extension
+point core already has, one small general new extension point, modifying core classes —
+counts what each would change (core files, public signatures, new virtuals and the classes
+that inherit them, callers, includes, instantiation files, Python bindings, behaviour that
+changes for existing code), and asks you to choose. A debate panel is offered, never run
+unasked, when the recommended interface adds to or modifies core or you cannot decide: two
+opus positions, one round, with a third position only for an interface on a hot path. The result is two files in `.claude/plans/<slug>/`:
+`design.md`, with the chosen interface as declarations, and `budget.tsv`:
+
+```
+home    optional/gsKLShell/                 the feature lives here
+base    .                     stable
+base    optional/gsKLShell    main
+allow   src/gsCore/gsFunctionSet.h          one new virtual with a default body
+```
+
+The budget is the ceiling for the feature across every plan made for it; a plan's file
+inventory is what one run touches and must fit inside it. `intrusion.sh check` compares the
+whole change with the budget (rule `DS-BUDGET`) at four points: `/gismo:plan` checks its
+inventory before anything is built, `/gismo:implement` checks after every task cycle and at
+the end of the run and stops to ask you on a violation, and `/gismo:review` at every level
+reports one as a major finding that always comes to you. From `large` up the review also
+runs a design audit, with or without a budget: it measures what the change touches outside
+the feature's directory and, when that is more than new examples, tests and docs, has one
+more opus reviewer place each file (rule `DS-REACH`). Work on the core library itself has
+no such directory and is not audited. Only you widen a budget; no agent adds an `allow`
+row. `/gismo:design audit [<base-ref>]` does the reverse for a branch that already exists:
+it measures the real diff outside the feature's directory and proposes, file by file,
+whether to move the change into the module, use an existing extension point, generalise it,
+keep it or revert it.
+
+**Proposing the change: `/gismo:pr [<base-ref>]`.** The last step writes the pull-request
+description from what the earlier steps left on disk, one file per repository, since an
+optional module is its own repository and needs its own pull request. It follows G+Smo's
+template (`NEW:`, `IMPROVED:`, `FIXED:`, `API:` lines and the doxygen and tests checklist),
+always carries a section on API and semantic changes (which says "None" and how that is
+known when there are none), reports the reach into core against the budget, and cites the
+review: its level, what it found, what was fixed or accepted, and what it did not check.
+It warns you first when no review was run, when a blocker or major is still open, or when
+the review predates the latest commits, and the description then says the same. A note
+states which parts were AI-generated and what a person reviewed; the skill asks you for
+that and never writes it on your behalf. It never commits. Pushing the branch and opening
+the pull request are separate steps that each need an explicit yes, and the pull request
+is opened as a draft unless you say otherwise.
 
 **Processing a report: `/gismo:review resolve [<review-dir>]`.** A report mixes trivia with
 real decisions, so each finding is triaged when the report is written. `mechanical` findings
@@ -409,11 +459,13 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 
 | Skill | Purpose |
 |---|---|
+| `/gismo:design` | Choose a feature's interface before planning: alternatives from least to most intrusive, measured, with an intrusion budget of core files; `audit` measures an existing branch |
 | `/gismo:plan` | Triage (quick/standard) + planning conventions → `plan.md` (+ decomposition) |
 | `/gismo:implement` | Closed-loop orchestration of an approved plan, in either mode |
 | `/gismo:evidence-log` | Run a command through a verbatim numbered logger; reports cite log path and line range |
 | `/gismo:review` | Review of a change at four depths (`light`, `medium`, `large`, `ultra`) into one triaged report; `resolve` to process a report with you; `cleanup` for the one-off tree cleanup |
 | `/gismo:tidy` | Strip change-narration comments from the diff before committing |
+| `/gismo:pr` | Write the pull-request description from the design, plan and review records, per repository; opens a draft pull request only on an explicit yes |
 | `/gismo:dev-config` | Set build dir + parallel-jobs cap |
 | `/gismo:build-target` | Guarded `make <target>` — the only sanctioned build |
 | `/gismo:syntax-check` | Per-file `-fsyntax-only` gate via `compile_commands.json` |
@@ -463,6 +515,7 @@ gsAgents/
 │   └── marketplace.json    # this repo doubles as its own marketplace
 ├── agents/*.md             # agent definitions (Claude format)
 ├── skills/<name>/          # SKILL.md + scripts/, per the Agent Skills standard
+│   ├── design/             #   scripts/ (intrusion measure and budget check, with tests)
 │   ├── implement/          #   TASK_CONTRACT.md (protocol), STANDING_RULES.md (every-run rules)
 │   └── review/             #   CONVENTIONS.md (the rulebook), scripts/ (scope, lint, tree cleanup)
 ├── hooks/hooks.json        # PreToolUse guard against model overrides

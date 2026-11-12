@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 # review_scope.sh — list the files (or changed line ranges) a review has to look at.
-# Usage: review_scope.sh [--base <ref>] [--lines] [--all-files] [<path>...]
+# Usage: review_scope.sh [--base <ref>] [--nested-base <module-path>=<ref>]...
+#                        [--lines] [--all-files] [--split-renames] [--no-skip] [<path>...]
 #
 #   default      working tree against HEAD, plus untracked files
 #   --base REF   working tree against `git merge-base REF HEAD` (root repo only)
+#   --nested-base optional/<module>=REF
+#                that nested repository against `git merge-base REF HEAD` run inside it;
+#                repeatable, one per module (a leading ./ and a trailing / are ignored; the
+#                same module twice, a repository without commits and an unknown ref are
+#                failures). Nested repositories without one use HEAD.
 #   --lines      emit "<path>\t<start>-<end>" per added/changed hunk instead of the file list
 #   --all-files  do not filter by extension
+#   --split-renames
+#                list a rename as two rows, D <old path> and A <new path>, instead of one R row
+#   --no-skip    skip only .git and .claude directories and untracked files of a top-level build* tree; by default external, env, venv, build*
+#                and similar directories are skipped at any depth
 #   <path>...    restrict to these paths (relative to the cwd or absolute)
 #
 # stdout (TSV): <repo>\t<status>\t<path>   repo = "." or optional/<module>,
 #               status = A|M|D|R, path relative to the G+Smo root.
 # Nested git repositories under optional/ are diffed on their own; a root-level
 # `git diff` sees nothing inside them. Last line: STATUS: OK <n> files | STATUS: FAIL <reason>.
+# Exit codes: 0 ok, 2 failure (bad option, bad module path, ref without merge base, git error).
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -24,19 +35,45 @@ fail() {
     exit 2
 }
 
-BASE=""; LINES=0; ALLFILES=0; PATHS=()
+BASE=""; LINES=0; ALLFILES=0; NOSKIP=0; RENAME_OPT="-M"; PATHS=()
+declare -A NESTED_BASE=()
+
+# add_nested_base <module-path>=<ref>
+# The module path is normalised: leading "./", trailing "/" and doubled "/" are dropped.
+add_nested_base() {
+    local mod="${1%%=*}" ref="${1#*=}"
+    case "$1" in *=*) ;; *) fail "--nested-base needs <module-path>=<ref>, got '$1'" ;; esac
+    while [ "$mod" != "${mod//\/\//\/}" ]; do mod="${mod//\/\//\/}"; done
+    while :; do
+        case "$mod" in
+            ./*) mod="${mod#./}" ;;
+            */)  mod="${mod%/}" ;;
+            *)   break ;;
+        esac
+    done
+    [ -n "$mod" ] && [ -n "$ref" ] || fail "--nested-base needs <module-path>=<ref>, got '$1'"
+    [ -z "${NESTED_BASE[$mod]+set}" ] || fail "--nested-base given twice for '$mod'"
+    NESTED_BASE["$mod"]="$ref"
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --base)      [ $# -ge 2 ] || fail "--base needs a ref"; BASE="$2"; shift 2 ;;
         --base=*)    BASE="${1#--base=}"; shift ;;
+        --nested-base)   [ $# -ge 2 ] || fail "--nested-base needs <module-path>=<ref>"; add_nested_base "$2"; shift 2 ;;
+        --nested-base=*) add_nested_base "${1#--nested-base=}"; shift ;;
         --lines)     LINES=1; shift ;;
         --all-files) ALLFILES=1; shift ;;
-        -h|--help)   sed -n '2,14p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        --split-renames) RENAME_OPT="--no-renames"; shift ;;
+        --no-skip)   NOSKIP=1; shift ;;
+        -h|--help)   sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
         --)          shift; PATHS+=("$@"); break ;;
         -*)          fail "unknown option $1" ;;
         *)           PATHS+=("$1"); shift ;;
     esac
 done
+
+[ "$NOSKIP" -eq 1 ] && SKIP_DIRS=".git .claude"
 
 source "$SCRIPT_DIR/../../dev-config/scripts/gismo_env.sh"
 # Only the repo root is needed here; a missing build directory is not an error.
@@ -54,8 +91,15 @@ git_out() {
     local dir="$1" where; shift
     where="${dir#"$ROOT"}"; where="${where#/}"
     if ! GIT_OUT="$(git -C "$dir" -c core.quotepath=off "$@" 2>"$GIT_ERR")"; then
-        fail "git ${1} failed in ${where:-.}: $(head -n1 "$GIT_ERR")"
+        fail "git ${1} failed in ${where:-.}$(err_tail)"
     fi
+}
+
+# err_tail -> ": <first line of git's stderr>", or nothing when git said nothing.
+err_tail() {
+    local m
+    m="$(head -n1 "$GIT_ERR")"
+    [ -z "$m" ] || printf ': %s' "$m"
 }
 
 PREFIXES=()
@@ -76,6 +120,12 @@ for d in "$ROOT"/optional/*/; do
     [ -e "${d}.git" ] && NESTED+=("optional/$(basename "$d")")
 done
 
+for m in "${!NESTED_BASE[@]}"; do
+    found=0
+    for n in ${NESTED[@]+"${NESTED[@]}"}; do [ "$n" = "$m" ] && found=1; done
+    [ "$found" -eq 1 ] || fail "--nested-base: '$m' is not a nested repository under optional/"
+done
+
 want_path() {
     [ "${#PREFIXES[@]}" -eq 0 ] && return 0
     local q
@@ -92,7 +142,7 @@ keep_path() {
     case "$1" in */*) dir="${1%/*}" ;; esac
     local IFS=/
     for c in $dir; do
-        case "$c" in build*) return 1 ;; esac
+        if [ "$NOSKIP" -eq 0 ]; then case "$c" in build*) return 1 ;; esac; fi
         case " $SKIP_DIRS " in *" $c "*) [ -n "$c" ] && return 1 ;; esac
     done
     [ "$ALLFILES" -eq 1 ] && return 0
@@ -121,6 +171,8 @@ in_nested() {
 resolve_ref() {
     if [ -n "$BASE" ] && [ "$1" = "." ]; then
         git -C "$ROOT" merge-base "$BASE" HEAD 2>"$GIT_ERR" || return 1
+    elif [ "$1" != "." ] && [ -n "${NESTED_BASE[$1]:-}" ]; then
+        git -C "$ROOT/$1" merge-base "${NESTED_BASE[$1]}" HEAD 2>"$GIT_ERR" || return 1
     else
         echo HEAD
     fi
@@ -129,11 +181,15 @@ resolve_ref() {
 collect_repo() {
     local label="$1" dir prefix="" ref st a b s p o
     if [ "$label" = "." ]; then dir="$ROOT"; else dir="$ROOT/$label"; prefix="$label/"; fi
-    # A repository without commits has nothing to diff against; not an error.
-    git -C "$dir" rev-parse --verify -q HEAD >/dev/null 2>&1 || return 0
-    if [ "$label" != "." ]; then NESTED_DIFFED+=("$label"); fi
-    ref="$(resolve_ref "$label")" || fail "no merge-base between '$BASE' and HEAD: $(head -n1 "$GIT_ERR")"
-    git_out "$dir" diff --name-status -M --relative "$ref" --
+    # A repository without commits has nothing to diff against: not an error, unless a
+    # base was requested for it.
+    if ! git -C "$dir" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+        [ -z "${NESTED_BASE[$label]:-}" ] || fail "--nested-base: $label has no commits"
+        return 0
+    fi
+    if [ "$label" != "." ] && [ -z "${NESTED_BASE[$label]:-}" ]; then NESTED_DIFFED+=("$label"); fi
+    ref="$(resolve_ref "$label")" || fail "no merge-base between '${NESTED_BASE[$label]:-$BASE}' and HEAD$([ "$label" = "." ] || printf ' in %s' "$label")$(err_tail)"
+    git_out "$dir" diff --name-status "$RENAME_OPT" --relative "$ref" --
     while IFS=$'\t' read -r st a b; do
         s="${st:0:1}"; p="$a"; o=""
         case "$s" in
@@ -151,6 +207,9 @@ collect_repo() {
         [ -n "$p" ] || continue
         case "$p" in */) continue ;; esac
         if [ "$label" = "." ] && in_nested "$prefix$p"; then continue; fi
+        # An untracked top-level build tree holds thousands of generated files and no
+        # source, so it stays out even under --no-skip; tracked files there are listed.
+        if [ "$NOSKIP" -eq 1 ] && [ "$label" = "." ]; then case "$p" in build*/*) continue ;; esac; fi
         emit "$label" A "$prefix$p"
     done <<<"$GIT_OUT"
 }
@@ -200,9 +259,9 @@ for e in ${SORTED[@]+"${SORTED[@]}"}; do
         n="$(awk 'END { print NR }' "$ROOT/$p")"
         [ "$n" -gt 0 ] && out="$(printf '%s\t1-%d' "$p" "$n")"
     else
-        ref="$(resolve_ref "$label")" || fail "no merge-base between '$BASE' and HEAD"
+        ref="$(resolve_ref "$label")" || fail "no merge-base between '${NESTED_BASE[$label]:-$BASE}' and HEAD$([ "$label" = "." ] || printf ' in %s' "$label")$(err_tail)"
         files=("$rel"); [ -n "$ro" ] && files=("$ro" "$rel")
-        git_out "$dir" diff -U0 -M "$ref" -- "${files[@]}"
+        git_out "$dir" diff -U0 "$RENAME_OPT" "$ref" -- "${files[@]}"
         out="$(hunk_ranges "$p" <<<"$GIT_OUT")"
     fi
     if [ -n "$out" ]; then
