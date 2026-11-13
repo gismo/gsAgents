@@ -453,7 +453,6 @@ def run(argv: Optional[List[str]] = None) -> int:
             print("OFFENDER\t%s" % b)
         print("STATUS: FAIL proof")
         return 1
-    print("STATUS: OK %d files changed%s" % (totals["files"], tail))
     if ns.mode == "whitespace":
         msg = "style: strip trailing whitespace, expand leading tabs, normalise line endings"
         body = "Mechanical cleanup by tree_cleanup.sh whitespace; git diff -w is empty."
@@ -462,6 +461,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         body = "Mechanical cleanup by tree_cleanup.sh doxygen-tags; only '\\' -> '@' before listed commands."
     print("Suggested commit message:\n  %s\n\n  %s" % (msg, body))
     print("Reminder: add the new commit hash to .git-blame-ignore-revs.")
+    print("STATUS: OK %d files changed%s" % (totals["files"], tail))
     return 0
 
 

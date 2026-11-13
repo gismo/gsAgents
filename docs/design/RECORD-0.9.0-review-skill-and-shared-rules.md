@@ -93,9 +93,10 @@ corpus `skills/diagnose` mines). Three things stood out:
   Delete/Keep judgement and the style checker remain.
 - `GISMO_NDEBUG` is `unknown` when neither `CMakeCache.txt` nor `compile_commands.json` decides it, and
   agents then make no claim that an assertion was exercised.
+- `EX-GETVALUES` looks back at most 15 lines of code for `try` instead of tracking scope; a `try` that
+  far above is not recognised, and a `catch` on an earlier line ends the search.
 - The level costs are qualitative. No per-level token measurement exists yet; a first batch of real
   reviews, mined with `/gismo:diagnose`, is what would justify retuning the levels.
-- `skills/diagnose/scripts/test_harvest.py` has 46 tests (it had 41 at 0.8.0, see
-  `DIAGNOSIS-AND-PLAN.md`).
+- `skills/diagnose/scripts/test_harvest.py` grew from 41 tests at 0.8.0 (see `DIAGNOSIS-AND-PLAN.md`).
 
 Update 2026-11-12 (review of 0.9.0): section 2 names three triage classes. Commit `071f615` added two, `confirm` and `info`; `skills/review/SKILL.md` section 7 is the current statement.

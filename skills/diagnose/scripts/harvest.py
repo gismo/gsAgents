@@ -622,8 +622,9 @@ def parse_lint_findings(text: str) -> List[ReviewFinding]:
     """Parse the finding lines of a review's ``input/lint.tsv``.
 
     Each line is ``<path>:<line>``, RULE-ID, severity and message, tab-separated.
-    ``SKIP``, ``STAT`` and ``STATUS:`` lines and anything else are ignored. The
-    findings are script-decided, hence ``MEASURED``.
+    ``SKIP``, ``STAT`` and ``STATUS:`` lines and anything else are ignored, as are
+    ``note`` rows, which are advisory and not findings. The findings are
+    script-decided, hence ``MEASURED``.
 
     :param text: the file content.
     :returns: the findings in file order, numbered from 1.
@@ -631,7 +632,7 @@ def parse_lint_findings(text: str) -> List[ReviewFinding]:
     findings: List[ReviewFinding] = []
     for line in text.splitlines():
         m = _LINT_LINE_RE.match(line.rstrip("\r"))
-        if not m:
+        if not m or m.group("sev") == "note":
             continue
         findings.append(
             ReviewFinding(
@@ -647,8 +648,14 @@ def parse_lint_findings(text: str) -> List[ReviewFinding]:
 
 
 def _review_dir_fingerprint(review_dir: Path) -> Optional[str]:
-    """SHA-256 over ``review.md``, the per-agent finding files and ``input/lint.tsv``."""
+    """SHA-256 over the plan slug, the timestamp directory name, ``review.md``, the per-agent
+    finding files and ``input/lint.tsv``.
+
+    Layout is ``<slug>/review/<timestamp>``; the slug and timestamp keep distinct runs with
+    identical content apart, while archived copies of one run still collide.
+    """
     digest = hashlib.sha256()
+    digest.update(("%s\0%s\0" % (review_dir.parent.parent.name, review_dir.name)).encode())
     empty = True
     for md_file in (
         sorted(review_dir.glob("*.md"))

@@ -913,3 +913,32 @@ def test_c4_consistent_files_produce_no_warning(tmp_path, capsys):
     harvest.main(["--roots", str(tmp_path), "--out", str(out_dir)])
     assert "Warnings" not in (out_dir / "summary.md").read_text()
     assert "warning" not in capsys.readouterr().out.lower()
+
+
+def test_lint_note_rows_are_not_harvested():
+    findings = harvest.parse_lint_findings(
+        "src/a.h:1\tID-INTLOOP\tnote\tloop variable of type 'int'\n"
+        "src/a.h:2\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    )
+    assert [(f.rule_id, f.severity) for f in findings] == [("WS-TRAIL", "minor")]
+
+
+def test_review_dedup_keeps_distinct_timestamps_and_collapses_archives(tmp_path):
+    lint = "src/a.h:2\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    _review_dir(tmp_path, "20261101-0900", lint=lint)
+    _review_dir(tmp_path, "20261102-0900", lint=lint)
+    archived = tmp_path / "archive" / ".claude" / "plans" / "feature" / "review" / "20261101-0900"
+    (archived / "input").mkdir(parents=True)
+    (archived / "input" / "lint.tsv").write_text(lint)
+    dirs = [d.name for d in harvest.iter_review_dirs([tmp_path])]
+    assert sorted(dirs) == ["20261101-0900", "20261102-0900"]
+
+
+def test_review_dedup_keeps_distinct_slugs_with_the_same_timestamp(tmp_path):
+    lint = "src/a.h:2\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    for slug in ("feature", "other"):
+        d = tmp_path / "repo" / ".claude" / "plans" / slug / "review" / "20261101-0900"
+        (d / "input").mkdir(parents=True)
+        (d / "input" / "lint.tsv").write_text(lint)
+    dirs = [d.parent.parent.name for d in harvest.iter_review_dirs([tmp_path])]
+    assert sorted(dirs) == ["feature", "other"]
