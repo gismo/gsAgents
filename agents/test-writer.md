@@ -28,7 +28,7 @@ A message delivered to you through `SendMessage` from the task-lead that dispatc
 
 ## Verification
 
-- Lint: `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh <your test files>` — fix every `major` and `minor` finding until it ends `STATUS: OK` before building; `note` lines are for your judgement.
+- Lint: `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh <your test files>` — fix every `major` and `minor` finding and re-run before building, three runs at most. A finding still reported after that, or one you judge the script got wrong, goes in your report with its line and your reason: a pattern-based rule can misfire, and a loop that only ends on `STATUS: OK` would then never end. `note` lines are for your judgement.
 - Build: `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh unittests`
 - Run only your suite: `bash ${CLAUDE_PLUGIN_ROOT}/skills/run-tests/scripts/run_unittests.sh --no-build <suite-prefix>` (prefix-matched).
 - What counts as verification evidence: only a real run of your suite that executes your new tests — "Did not find any matching test", a failed build or a runner that did not start is not a run. Run it, and the falsification runs below, through `bash ${CLAUDE_PLUGIN_ROOT}/skills/evidence-log/scripts/run_logged.sh <task-dir> <slug> <command…>` (skill `gismo:evidence-log`; `<task-dir>` is the `tasks/` directory beside your task file) and cite each in the report by log path and line range, never retyped. A syntax-only check does not count, and neither does a check command that failed to start — fix the invocation and run it again. If no real check could run, name which one and why in the report and end `RESULT: BLOCKED`; never report `RESULT: DONE` on unrun verification.

@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """review_lint.py -- deterministic style checks for G+Smo diffs (no model involved).
 
-Usage: review_lint.py [--base REF] [--all-lines] [--no-clang-format] [--linters] [PATH ...]
+Usage: review_lint.py [--base REF] [--nested-base optional/MODULE=REF]... [--all-lines]
+                      [--no-clang-format] [--linters] [PATH ...]
+
+``--base`` and ``--nested-base`` have the meaning they have for ``review_scope.sh``: the
+files of the nested repository ``optional/MODULE`` are compared against the merge base of
+REF and ``HEAD`` taken inside that repository. A ref that does not resolve is
+``STATUS: FAIL`` with exit 2.
 
 The file list and the added/changed line ranges come from ``review_scope.sh``. A finding is
 emitted only when its line lies in a changed range, unless ``--all-lines`` is given (whole
@@ -22,7 +28,8 @@ may report some findings at a lower severity than its table entry (``ID-INTLOOP`
 ``size_t`` loops as notes). Files with fewer than ``STAT_MIN_ADDED`` added lines get no
 per-file ``STAT`` row but still count in the total. ``FMT-CLANG`` yields at most one note per
 file, summarising the differing ranges. ``DX-TAG`` flags a backslash command on an added line
-only when the same command is absent from the lines its hunk removed.
+only when the same command is absent from the removed line it was edited from; commands
+inside ``\\code``/``\\verbatim`` blocks and formulas are never flagged.
 
 Exit: 0 no major or minor findings, 1 otherwise, 2 error.
 
@@ -46,33 +53,81 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tu
 # Tunable tables
 # ---------------------------------------------------------------------------------------
 
-#: Change narration / process references (CM-NARR). Matched case-insensitively against
-#: comment text and string-literal contents. One regex fragment per entry.
-NARRATION_PATTERNS: List[str] = [
-    r"\btasks?\s+\d+\b",
+#: Process references (CM-NARR): task, plan, spec and review bookkeeping. They are wrong in
+#: a comment and wrong in a user-facing string. Matched case-insensitively against comment
+#: text and string-literal contents. One regex fragment per entry. "task 4 of 8" is a
+#: progress message, not bookkeeping.
+NARRATION_PROCESS_PATTERNS: List[str] = [
+    r"\btasks?\s+\d+\b(?!\s+of\s+\d)",
     r"\bsteps?\s+\d+\s+of\s+the\s+plan\b",
     r"\.claude/plans",
-    r"\bper\s+(?:the\s+)?spec\b",
+    r"\bper\s+(?:the\s+)?(?:spec|plan|ticket)\b",
     r"\bacceptance\s+criteri",
     r"\breview(?:er)?\s+points?\b",
-    r"(?-i:\bRound\s+\d+\b)",
     r"\bTODO\(review\)",
-    # "previously created/computed ..." describes program state, not the change history.
-    r"\bpreviously\b(?!\s+(?:\w+ed|set|built|found|made|run|seen|given|chosen|written|read)\b)",
+    r"\bas\s+requested\s+by\s+(?:the\s+)?(?:reviewer|user|maintainer|author)\b",
+    # "addresses" alone is dominated by memory addresses; require a review-like object.
+    r"\baddress(?:es|ed)\s+(?:the\s+)?(?:review|reviewer|feedback|#)",
+]
+
+#: Process references matched against comments only: a run-time message may count its own
+#: rounds ("Round 1: refine uniformly").
+NARRATION_COMMENT_PROCESS_PATTERNS: List[str] = [
+    r"(?-i:\bRound\s+\d+\b)",
+]
+
+#: Narration of the change to the code (CM-NARR), matched against comments only. A message
+#: printed at run time ("removed the duplicate knots") and an algorithm's own steps
+#: ("residual changed from the previous iteration", "replaced by its transpose") use the
+#: same words, so each entry needs a marker of code history: a subject that is the code
+#: ("it previously returned"), a retirement wording ("no longer needed"), or an object that
+#: is code ("removed the old loop", "replaced by the helper below").
+NARRATION_CHANGE_PATTERNS: List[str] = [
+    # "previously computed ..." describes program state; a sentence that opens with
+    # "previously" followed by anything else tells the history of the code.
+    r"(?:^\s*|[.;:!?]\s+)previously\b(?!\s+(?:\w+ed|set|built|found|made|run|seen|given|chosen|written|read)\b)",
+    r"\b(?:it|this|that|we|they|which)\s+previously\b",
+    r"\b(?:was|were)\s+previously\s+(?:removed|replaced|renamed|refactored|rewritten|reworked)\b",
     # "the step no longer changes" describes an algorithm; only retirement wording narrates.
-    r"\bno\s+longer\s+(?:used|needed|required|necessary|supported|exists?|present)\b",
+    r"\bno\s+longer\s+(?:used|needed|required|necessary|supported)\b",
     # "is used to ..." / "used to denote ..." state a purpose; only a subject followed by
     # "used to" ("it used to return") narrates history.
     r"\b(?:it|this|that|they|we|which|there)\s+used\s+to\b",
-    r"\bwas\s+(?:removed|replaced|renamed|changed)\b",
-    r"\bremoved\s+the\b",
-    r"(?<!\bis\s)(?<!\bare\s)(?<!\bbe\s)(?<!\bbeen\s)(?<!\bcould\sbe\s)\breplaced\s+by\b",
-    r"\bchanged\s+from\b",
+    r"\b(?:was|were|has\s+been|have\s+been)\s+(?:removed|replaced|renamed|refactored|rewritten"
+    r"|reworked)\s+(?:in\s+favou?r\s+of|because|since|to\s+(?:avoid|fix|reduce|simplify|speed"
+    r"|make|allow|enable))\b",
+    r"\b(?:has|have)\s+been\s+(?:refactored|rewritten|reworked)\b",
+    r"\bremoved\s+the\s+(?:(?:old|former|obsolete|legacy|previous)\s+(?:code|loop|branch"
+    r"|implementation|version|helper|workaround|check|call|function|method|logic|approach)"
+    r"|workaround|hack|dead\s+code|unused\s+(?:code|variable|function|helper|include"
+    r"|parameter|argument|member))\b",
+    r"(?<!\bis\s)(?<!\bare\s)(?<!\bbe\s)(?<!\bbeen\s)(?<!\bcould\sbe\s)"
+    r"\breplaced\s+(?:by|with)\s+(?:the\s+)?(?:new|helper|function|call|version|method|class"
+    r"|implementation|code|loop|below|above)\b",
+    # "the old version of the basis" and "old behaviour of gsBSpline" name data or a
+    # supported option, so only the code itself counts.
+    r"\b(?:old|former|legacy)\s+(?:implementation|code)\b",
     r"\bas\s+requested\b(?!\s+(?:from|by|in|for|at|with)\b)",
-    # "addresses" alone is dominated by memory addresses; require a review-like object.
-    r"\baddresses\s+(?:the\s+)?(?:review|comment|feedback|point|issue|concern|#)",
-    # "patch" is a geometry term in G+Smo ("this patch"), so only code-change nouns count.
-    r"\bthis\s+(?:fix|change|commit|(?-i:PR))\b",
+    r"\baddress(?:es|ed)\s+(?:the\s+)?(?:comment|point|issue|concern)\b",
+    # "patch" is a geometry term in G+Smo ("this patch"), so only code-change nouns count;
+    # "this change of variables" is mathematics, so "this change" needs a verb.
+    r"\bthis\s+(?:fix(?![-\s]?points?\b)|commit|(?-i:PR))\b",
+    r"\bthis\s+change\s+(?:fixes|avoids|removes|adds|introduces|replaces|reverts)\b",
+    # A changelog entry opens the comment with a past-tense verb and its object. "Fixed-size",
+    # "Changed entries are ...", "Removed elements are ..." and "Updated Lagrangian" describe
+    # the program, so the object must be a determiner or a word that marks code ("unused",
+    # "redundant") and a hyphen right after the verb excludes compounds. "a" and "to" are
+    # too common after most of these verbs ("Fixed a point on the curve", "Changed a to b",
+    # "Changed to the reference configuration"), so they count only after the verb where
+    # they open a changelog entry: "Added a null check", "Refactored to avoid duplication".
+    r"^[\s*/!<]*(?:Added|Fixed|Changed|Refactored|Reverted|Renamed)\s+(?:an|the|this|that)\b(?!-)",
+    r"^[\s*/!<]*Added\s+a\b(?!-)(?!\s+to\b)",
+    r"^[\s*/!<]*Refactored\s+to\b(?!-)",
+    r"^[\s*/!<]*(?:Removed|Replaced)\s+(?:a|an|this|that|unused|redundant|obsolete|unnecessary"
+    r"|the\s+(?:redundant|unused|obsolete|unnecessary|old|former|previous|loop|check|include"
+    r"|workaround|hack))\b",
+    r"^[\s*/!<]*Now\s+(?:uses|returns|calls|takes)\b",
+    r"\bwas\s+(?:changed|replaced|removed|renamed)\s+(?:to|by|with|in)\b",
 ]
 
 #: Capitalised words that are not emphasis (CM-EMPH). Words with fewer than four distinct
@@ -92,6 +147,9 @@ DX_COMMANDS: frozenset = frozenset(
     "brief param return returns tparam ingroup sa see note warning todo file class "
     "struct def ref cite code endcode copydoc throws pre post defgroup addtogroup name "
     "details author date deprecated bug remark remarks internal verbatim endverbatim".split())
+
+#: Doxygen commands that open a block of literal text, mapped to the command that closes it.
+DX_BLOCK_END: Dict[str, str] = {"code": "endcode", "verbatim": "endverbatim"}
 
 #: Constructs newer than C++14 (ID-CXX17), matched against code with comments and strings
 #: blanked. Applies under src/, examples/ and unittests/ of the root repository only.
@@ -142,7 +200,10 @@ SEVERITY: Dict[str, str] = {
     "FMT-CLANG": "note", "EXT-TIDY": "note", "EXT-CPPCHECK": "note",
 }
 
-NARRATION_RE = re.compile("|".join("(?:%s)" % p for p in NARRATION_PATTERNS), re.I)
+PROCESS_RE = re.compile("|".join("(?:%s)" % p for p in NARRATION_PROCESS_PATTERNS), re.I)
+COMMENT_NARRATION_RE = re.compile(
+    "|".join("(?:%s)" % p for p in NARRATION_PROCESS_PATTERNS + NARRATION_COMMENT_PROCESS_PATTERNS
+             + NARRATION_CHANGE_PATTERNS), re.I)
 LINEREF_RE = re.compile(
     r"\b[\w./-]+\.(?:h|hpp|cpp|cxx|cc|py|cmake)\s*:\s*\d+|\blines?\s+\d+", re.I)
 EMPH_RE = re.compile(r"\b[A-Z]{5,}\b(?!\s*\()")
@@ -191,15 +252,23 @@ class LineInfo:
     :ivar segs: comment segments on this line
     :ivar strs: ``(start, end)`` spans of string-literal contents
     :ivar in_raw_end: whether the line ends inside a raw string literal
+    :ivar in_lit_end: whether the line ends inside a string or character literal continued
+        by a trailing backslash
     """
-    __slots__ = ("code", "segs", "strs", "in_raw_end")
+    __slots__ = ("code", "segs", "strs", "in_raw_end", "in_lit_end")
 
     def __init__(self, code: str, segs: List[Seg], strs: List[Tuple[int, int]],
-                 in_raw_end: bool) -> None:
+                 in_raw_end: bool, in_lit_end: bool = False) -> None:
         self.code = code
         self.segs = segs
         self.strs = strs
         self.in_raw_end = in_raw_end
+        self.in_lit_end = in_lit_end
+
+    @property
+    def in_literal_end(self) -> bool:
+        """Whether the line ends inside any multi-line literal (raw or backslash-continued)."""
+        return self.in_raw_end or self.in_lit_end
 
 
 def _numeric_separator(line: str, i: int) -> bool:
@@ -214,7 +283,8 @@ def lex(lines: Sequence[str]) -> List[LineInfo]:
     """Classify every character of a C++ file as code, comment or literal.
 
     Handles ``//`` (with backslash continuation), ``/* */``, ``///``, ``/** */``, string
-    literals with escapes, raw string literals, character literals and digit separators.
+    and character literals with escapes (also continued over lines by a trailing backslash),
+    raw string literals and digit separators.
 
     :param lines: source lines without line terminators
     :returns: one :class:`LineInfo` per line
@@ -223,6 +293,7 @@ def lex(lines: Sequence[str]) -> List[LineInfo]:
     mode = "none"  # none | block | raw
     block_doxy = False
     raw_close = ""
+    lit_quote = '"'  # delimiter of the string or character literal open in mode "lit"
     cont = False   # previous line was a // comment ending in a backslash
     cont_doxy = False
     for line in lines:
@@ -251,6 +322,17 @@ def lex(lines: Sequence[str]) -> List[LineInfo]:
             code[0:j + len(raw_close) - 1] = " " * (j + len(raw_close) - 1)
             mode = "none"
             i = j + len(raw_close)
+        elif mode == "lit":
+            j, spliced = _scan_literal(line, 0, lit_quote)
+            if lit_quote == '"':
+                strs.append((0, j))
+            if j >= n:
+                mode = "lit" if spliced else "none"
+                infos.append(LineInfo(" " * n, segs, strs, False, spliced))
+                continue
+            code[0:j] = " " * j
+            mode = "none"
+            i = j + 1
         elif cont:
             segs.append(Seg(0, n, cont_doxy, "line", False))
             cont = n > 0 and line[-1] == "\\"
@@ -302,35 +384,67 @@ def lex(lines: Sequence[str]) -> List[LineInfo]:
                             code[i + 1:j] = " " * (j - i - 1)
                             i = j + len(close)
                         continue
-                j = i + 1
-                while j < n and line[j] != '"':
-                    j += 2 if line[j] == "\\" else 1
-                j = min(j, n)
+                j, spliced = _scan_literal(line, i + 1, '"')
                 strs.append((i + 1, j))
                 code[i + 1:j] = " " * (j - i - 1)
+                if spliced:
+                    mode, lit_quote = "lit", '"'
                 i = j + 1
             elif c == "'":
                 if _numeric_separator(line, i):
                     i += 1
                     continue
-                j = i + 1
-                while j < n and line[j] != "'":
-                    j += 2 if line[j] == "\\" else 1
-                j = min(j, n)
+                j, spliced = _scan_literal(line, i + 1, "'")
                 code[i + 1:j] = " " * (j - i - 1)
+                if spliced:
+                    mode, lit_quote = "lit", "'"
                 i = j + 1
             else:
                 i += 1
-        infos.append(LineInfo("".join(code), segs, strs, mode == "raw"))
+        infos.append(LineInfo("".join(code), segs, strs, mode == "raw", mode == "lit"))
     return infos
 
 
-def main_body_lines(infos: Sequence[LineInfo]) -> Set[int]:
-    """Return the 1-based line numbers inside the body of a top-level ``main(...)``."""
-    inside: Set[int] = set()
+def _scan_literal(line: str, start: int, quote: str) -> Tuple[int, bool]:
+    """Find the end of a string or character literal whose contents begin at ``start``.
+
+    :param line: the source line
+    :param start: column of the first character after the opening quote (or of the line)
+    :param quote: the closing delimiter, ``"`` or ``'``
+    :returns: ``(column of the closing quote or len(line), whether a trailing backslash
+        continues the literal on the next line)``
+    """
+    n = len(line)
+    j = start
+    while j < n and line[j] != quote:
+        if line[j] == "\\" and j == n - 1:
+            return n, True
+        j += 2 if line[j] == "\\" else 1
+    return min(j, n), False
+
+
+#: The text in front of the ``{`` of a lambda body: introducer, parameters, specifiers and
+#: trailing return type (``[&](int k) mutable -> int``).
+LAMBDA_HEAD_RE = re.compile(
+    r"\[[^\[\]{};]*\]\s*(?:\([^{};]*\))?\s*(?:(?:mutable|noexcept|constexpr)\s*)*"
+    r"(?:->\s*[^{};]+?)?\s*$")
+
+
+def main_own_code(infos: Sequence[LineInfo]) -> Dict[int, str]:
+    """Return the code of ``main``'s own statements, by 1-based line number.
+
+    The body of a top-level ``main(...)`` is scanned with lambda bodies blanked out, so a
+    ``return`` inside a lambda is not mistaken for one of ``main``. Lines outside ``main``
+    are absent from the result.
+    """
+    own: Dict[int, str] = {}
     depth = 0
     state = "seek"  # seek -> sig (saw "main(") -> body
+    lambdas: List[bool] = []  # one entry per open brace of the body: is it a lambda body?
+    in_lambda = 0
+    stmt = ""  # code since the last ';', '{' or '}' of the body
     for ln, info in enumerate(infos, 1):
+        buf: List[str] = []
         for ch_i, ch in enumerate(info.code):
             if state == "seek" and depth == 0 and ch == "(" \
                     and re.search(r"\bmain\s*$", info.code[:ch_i]):
@@ -339,15 +453,34 @@ def main_body_lines(infos: Sequence[LineInfo]) -> Set[int]:
                 depth += 1
                 if state == "sig" and depth == 1:
                     state = "body"
+                elif state == "body":
+                    is_lambda = LAMBDA_HEAD_RE.search(stmt) is not None
+                    lambdas.append(is_lambda)
+                    in_lambda += is_lambda
+                    stmt = ""
             elif ch == "}":
                 depth -= 1
                 if state == "body" and depth == 0:
                     state = "seek"
+                elif state == "body" and lambdas:
+                    # The closing brace of a lambda belongs to the lambda, not to main.
+                    buf.append(" " if in_lambda else ch)
+                    in_lambda -= lambdas.pop()
+                    stmt = ""
+                    continue
             elif ch == ";" and state == "sig" and depth == 0:
                 state = "seek"
             if state == "body":
-                inside.add(ln)
-    return inside
+                if ch in ";{}":
+                    stmt = ""
+                else:
+                    stmt += ch
+            buf.append(ch if state == "body" and not in_lambda else " ")
+        if state == "body" or any(c != " " for c in buf):
+            own[ln] = "".join(buf)
+        if state == "body":
+            stmt += " "
+    return own
 
 
 EX_TRY_LOOKBACK = 15
@@ -374,42 +507,47 @@ def dx_hits(lines: Sequence[str], infos: Sequence[LineInfo]) -> List[Tuple[int, 
     """Find backslash doxygen commands inside doxygen comments.
 
     Text between formula delimiters (``\\f$ ... \\f$``, ``\\f[ ... \\f]``,
-    ``\\f{env}{ ... \\f}``) is skipped, as are all commands outside doxygen comments.
+    ``\\f{env}{ ... \\f}``) and between ``code``/``endcode`` or ``verbatim``/``endverbatim``
+    (written with ``\\`` or ``@``) is literal and skipped, as are all commands outside
+    doxygen comments. The block commands themselves are reported like any other command.
 
     :param lines: source lines without terminators
     :param infos: output of :func:`lex` for ``lines``
     :returns: ``(line index, column of the backslash, command name)`` triples
     """
     hits: List[Tuple[int, int, str]] = []
-    inline = display = code_block = False
+    inline = display = False
+    block = ""  # name of the end command that closes the literal block we are in
     for idx, (line, info) in enumerate(zip(lines, infos)):
         doxy_segs = [s for s in info.segs if s.doxy]
         if not doxy_segs:
-            inline = display = code_block = False
+            inline = display = False
+            block = ""
             continue
         for seg in doxy_segs:
             for m in DX_TOKEN_RE.finditer(line, seg.start, seg.end):
                 lead, name = m.group(1), m.group(2)
+                glued = m.start(1) > 0 and (line[m.start(1) - 1].isalnum() or line[m.start(1) - 1] == "_")
+                if block:
+                    if name == block:
+                        block = ""
+                        if lead == "\\" and not glued:
+                            hits.append((idx, m.start(1), name))
+                    continue
                 if name == "f$":
                     inline = not inline
                 elif name in ("f[", "f{"):
                     display = True
                 elif name in ("f]", "f}"):
                     display = False
-                elif lead == "\\" and not inline and not display and name in DX_COMMANDS \
-                        and not (m.start(1) > 0 and (line[m.start(1) - 1].isalnum() or line[m.start(1) - 1] == "_")):
-                    if name in ("endcode", "endverbatim"):
-                        code_block = False
+                elif not inline and not display and name in DX_COMMANDS and not glued:
+                    if lead == "\\":
                         hits.append((idx, m.start(1), name))
-                    elif not code_block:
-                        hits.append((idx, m.start(1), name))
-                        code_block = name in ("code", "verbatim")
-                elif name in ("code", "verbatim"):
-                    code_block = True
-                elif name in ("endcode", "endverbatim"):
-                    code_block = False
+                    if name in DX_BLOCK_END:
+                        block = DX_BLOCK_END[name]
             if seg.kind == "block" and seg.ends:
-                inline = display = code_block = False
+                inline = display = False
+                block = ""
     return hits
 
 
@@ -521,15 +659,15 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
     def ws_exempt(ln: int) -> Tuple[bool, bool]:
         """Return (leading, trailing) exemption of line ``ln`` from the whitespace rules.
 
-        Leading blanks are data on a line that starts inside a raw string; trailing blanks
-        only on a line that ends inside one. A line following a backslash-newline may
-        continue a string literal, so both are left alone.
+        Blanks are data on a line inside a raw string or a string literal continued by a trailing
+        backslash. A line that starts inside such a literal is exempt as a whole, its closing tail
+        included, because ``tree_cleanup`` leaves that line untouched and the two must agree; a line
+        that only ends inside one is exempt from the trailing-blank and CRLF rules.
         """
         if infos is None:
             return False, False
-        if ln > 1 and lines[ln - 2].endswith("\\"):
-            return True, True
-        return ln > 1 and infos[ln - 2].in_raw_end, infos[ln - 1].in_raw_end
+        starts_inside = ln > 1 and infos[ln - 2].in_literal_end
+        return starts_inside, starts_inside or infos[ln - 1].in_literal_end
 
     crlf = [i + 1 for i, l in enumerate(raw_lines)
             if l.endswith("\r") and (i + 1) in sel and not ws_exempt(i + 1)[1]]
@@ -557,7 +695,7 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
 
     parts = path.split("/")
     dirs = parts[:-1]
-    main_lines = main_body_lines(infos) if "examples" in dirs else set()
+    main_code = main_own_code(infos) if "examples" in dirs else {}
     in_examples = "examples" in dirs
     is_src = path.endswith(CXX_SRC_EXT)
     new = status == "A"
@@ -568,9 +706,9 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
         code = info.code
         ctext = _comment_text(line, info)
         if ctext or info.strs:
-            texts = [ctext] + [line[a:b] for a, b in info.strs]
-            for t in texts:
-                m = NARRATION_RE.search(t)
+            texts = [(ctext, COMMENT_NARRATION_RE)] + [(line[a:b], PROCESS_RE) for a, b in info.strs]
+            for t, rx in texts:
+                m = rx.search(t)
                 if m:
                     add(ln, "CM-NARR", "change narration or process reference: '%s'" % m.group(0))
                     break
@@ -610,7 +748,7 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
                 if m:
                     add(ln, "ID-CXX17", "%s ('%s'); C++14 is the ceiling" % (what, m.group(0).strip()))
                     break
-        if ln in main_lines and re.search(r"\breturn\s+(?:0|1|-\s*1)\s*;", code):
+        if re.search(r"\breturn\s+(?:0|1|-\s*1)\s*;", main_code.get(ln, "")):
             add(ln, "EX-RETURN", "main() must return EXIT_SUCCESS/EXIT_FAILURE")
         if in_examples and is_src and code.lstrip().startswith("#") \
                 and re.match(r'\s*#\s*include\s*["<][^">]*\.cpp[">]', line):
@@ -634,12 +772,16 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
 
 
 def removed_dx_commands(repo_dir: str, ref: str, path: str) -> Dict[int, Set[str]]:
-    """Map each added line to the backslash doxygen commands removed by its hunk.
+    """Map each added line to the backslash doxygen commands of the removed line it replaces.
 
-    Runs ``git diff -U0`` and, per hunk, collects the commands of :data:`DX_COMMANDS` written
-    as ``\\cmd`` on the removed lines. DX-TAG uses this to tell a tag the change introduced
-    from one that was already there while other text on the line was edited. A rename is not
-    followed (``path`` alone is diffed), so a renamed file reports as all added.
+    Runs ``git diff -U0`` and, per hunk, pairs every added line with the removed line it was
+    edited from: positionally when the hunk removes and adds the same number of lines, else
+    greedily by text similarity (at least :data:`DX_PAIR_RATIO`). The commands of
+    :data:`DX_COMMANDS` written as ``\\cmd`` on that removed line are the value. DX-TAG uses
+    this to tell a tag the change introduced from one that was already there while other
+    text on the line was edited; an added line without a counterpart gets no entry, so a
+    tag it carries is reported even when another line of the hunk had the same command. A
+    rename is not followed (``path`` alone is diffed), so a renamed file reports as all added.
 
     :param repo_dir: working directory of the git repository holding ``path``
     :param ref: revision the working tree is compared with
@@ -647,32 +789,65 @@ def removed_dx_commands(repo_dir: str, ref: str, path: str) -> Dict[int, Set[str
     :returns: ``{new line number: commands}``; empty when git fails or nothing was removed
     """
     try:
-        r = _run(["git", "-c", "core.quotepath=off", "diff", "-U0", ref, "--", path], repo_dir)
+        r = _run(["git", "-c", "core.quotepath=off", "diff", "--no-color", "-U0", ref, "--", path],
+                repo_dir)
     except (OSError, subprocess.TimeoutExpired):
         return {}
     if r.returncode != 0:
         return {}
     out: Dict[int, Set[str]] = {}
-    span: range = range(0)
-    cmds: Set[str] = set()
+    start = 0
+    old: List[str] = []
+    new: List[str] = []
 
     def flush() -> None:
-        if cmds:
-            for n in span:
-                out[n] = set(cmds)
+        for k, j in _pair_lines(old, new):
+            cmds = {m.group(2) for m in DX_TOKEN_RE.finditer(old[j])
+                    if m.group(1) == "\\" and m.group(2) in DX_COMMANDS}
+            if cmds:
+                out[start + k] = cmds
 
     for l in r.stdout.split("\n"):
         h = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", l)
         if h:
             flush()
             start = int(h.group(1))
-            span = range(start, start + (1 if h.group(2) is None else int(h.group(2))))
-            cmds = set()
+            old, new = [], []
         elif l.startswith("-") and not l.startswith("---"):
-            cmds.update(m.group(2) for m in DX_TOKEN_RE.finditer(l)
-                        if m.group(1) == "\\" and m.group(2) in DX_COMMANDS)
+            old.append(l[1:])
+        elif l.startswith("+") and not l.startswith("+++"):
+            new.append(l[1:])
     flush()
     return out
+
+
+#: Smallest :class:`difflib.SequenceMatcher` ratio at which an added line counts as the edit
+#: of a removed line when the hunk removes and adds different numbers of lines.
+DX_PAIR_RATIO = 0.6
+
+
+def _pair_lines(old: List[str], new: List[str]) -> List[Tuple[int, int]]:
+    """Pair the added lines of a hunk with the removed lines they were edited from.
+
+    :param old: removed lines of one ``-U0`` hunk
+    :param new: added lines of the same hunk
+    :returns: ``(index into new, index into old)`` pairs, each line used at most once
+    """
+    if len(old) == len(new):
+        return list(zip(range(len(new)), range(len(old))))
+    cand = sorted(((difflib.SequenceMatcher(None, o.strip(), n.strip()).ratio(), k, j)
+                   for k, n in enumerate(new) for j, o in enumerate(old)), reverse=True)
+    used_new: Set[int] = set()
+    used_old: Set[int] = set()
+    pairs: List[Tuple[int, int]] = []
+    for ratio, k, j in cand:
+        if ratio < DX_PAIR_RATIO:
+            break
+        if k not in used_new and j not in used_old:
+            used_new.add(k)
+            used_old.add(j)
+            pairs.append((k, j))
+    return pairs
 
 
 def _new_file_rules(path: str, name: str, stem: str, dirs: List[str], lines: List[str],
@@ -885,9 +1060,11 @@ def walk_paths(root: str, paths: List[str]) -> List[str]:
     return sorted(set(found))
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def run(argv: Optional[List[str]] = None) -> int:
+    """Parse the arguments, lint the selected files and print the report; see the module docstring."""
     ap = argparse.ArgumentParser(description="Deterministic style checks on a G+Smo diff.")
     ap.add_argument("--base")
+    ap.add_argument("--nested-base", action="append", default=[], metavar="MODULE=REF")
     ap.add_argument("--all-lines", action="store_true")
     ap.add_argument("--no-clang-format", action="store_true")
     ap.add_argument("--linters", action="store_true")
@@ -899,7 +1076,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         fail("GISMO_ROOT not set (run through review_lint.sh)")
     root = os.path.realpath(root)
     env = dict(os.environ, GISMO_ROOT=root)
-    scope_args: List[str] = (["--base", ns.base] if ns.base else []) + ns.paths
+    scope_args: List[str] = (["--base", ns.base] if ns.base else [])
+    nested_refs: Dict[str, str] = {}
+    for spec in ns.nested_base:
+        scope_args += ["--nested-base", spec]
+        mod, _, nref = spec.partition("=")
+        nested_refs[os.path.normpath(mod)] = nref
+    scope_args += ns.paths
 
     status: Dict[str, str] = {}
     repo_of: Dict[str, str] = {}
@@ -962,8 +1145,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             repo = repo_of.get(path, ".")
             nested = repo != "."
             ref = "HEAD"
-            if ns.base and not nested:
-                mb = _run(["git", "merge-base", ns.base, "HEAD"], root)
+            base_ref = nested_refs.get(repo) if nested else ns.base
+            if base_ref:
+                mb = _run(["git", "merge-base", base_ref, "HEAD"],
+                          os.path.join(root, repo) if nested else root)
                 ref = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else "HEAD"
             removed = removed_dx_commands(os.path.join(root, repo) if nested else root, ref,
                                           path[len(repo) + 1:] if nested else path)
@@ -1018,6 +1203,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     print("STATUS: OK")
     return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """Run :func:`run`; an unexpected exception ends in ``STATUS: FAIL`` with exit code 2.
+
+    Exit code 1 is reserved for findings, so a crash must not reach the caller as one.
+    """
+    try:
+        return run(argv)
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("review_lint: unexpected %s: %s\n" % (type(e).__name__, e))
+        print("STATUS: FAIL internal error: %s: %s" % (type(e).__name__, e))
+        return 2
 
 
 if __name__ == "__main__":

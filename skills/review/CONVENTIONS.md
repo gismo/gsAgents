@@ -11,7 +11,7 @@ Every rule has an ID, a severity and a checker.
 
 - **Severity.** `major`: must be fixed before merge. `minor`: should be fixed; cheap.
   `note`: reported for the author's judgement, never counted against the change.
-- **Checker.** `script`: decided by `scripts/review_lint.sh`, with no model involved. `script + style`: the script checks that the thing is present, or reports as a note what it cannot judge, and the style checker decides whether it is right.
+- **Checker.** `script`: decided by `scripts/review_lint.sh`, or for section 9 by the script named there, with no model involved. `script + style`: the script checks that the thing is present, or reports as a note what it cannot judge, and the style checker decides whether it is right.
   `style`: needs reading, done by `gismo:style-checker`. `review`: needs understanding of
   behaviour, done by `gismo:task-reviewer`.
 - **Scope.** A rule applies to lines the change added or modified. Older code in a touched
@@ -49,7 +49,7 @@ not checked.
 | HD-PRAGMA | major | script | *New files.* A `.h` file uses `#pragma once`. |
 | HD-SPLIT | major | style | A class template is declared in `gsFoo.h`, defined in `gsFoo.hpp`, and instantiated in `gsFoo_.cpp` with `CLASS_TEMPLATE_INST`. A non-template free function is declared `GISMO_EXPORT` in the `.h` and defined in a `.cpp` (the library builds with hidden visibility, so an unexported symbol does not link). |
 | HD-HPPTAIL | major | script | *New files.* A `.h` with a `.hpp` ends, after the namespace, with `#include GISMO_HPP_HEADER(gsFoo.hpp)` inside `#ifndef GISMO_BUILD_LIB`. |
-| HD-SELF | major | review | A header compiles when it is the first include of a translation unit. `/gismo:syntax-check` on the header is the test. |
+| HD-SELF | major | script | *New files.* A `.h` compiles when it is the first include of a translation unit. `/gismo:syntax-check` on the header is the test and fails a new `.h` that compiles only with `gismo.h` force-included; a `.hpp` is included from its `.h` and is exempt. |
 | HD-INCL | minor | style | Library headers are included as `<gsModule/gsFile.h>`. Include order is not prescribed; do not reorder existing includes. |
 
 ## 3. Naming
@@ -71,7 +71,7 @@ not checked.
 | ID-TYPES | major | style | Floating-point quantities are `real_t`, never `double` or `float`, so the library still builds with other coefficient types. |
 | ID-INTLOOP | major | script + style | Loop counters, sizes and anything that indexes a matrix, a basis or a DoF are `index_t`; `int` and `unsigned` in those roles are findings. `size_t` is right where the counter is bounded by or indexes a standard container, and `short_t` for dimensions, patch sides and other small counts. A script cannot see which it is, so it reports a `size_t` loop as a note and the style checker decides. `int` is right for `argc`, return codes and third-party APIs that ask for it. |
 | ID-COUT | major | script | Output goes through `gsInfo`, `gsWarn` and `gsDebug`, never `std::cout`, `std::cerr` or `printf`. |
-| ID-MOVE | major | style | Ownership of a G+Smo object (matrix, basis, geometry, `uPtr`) is transferred with `give(x)`, not `std::move(x)`. `std::move` on a plain standard-library value is fine. |
+| ID-MOVE | major | style | Ownership of a G+Smo object (matrix, basis, geometry, `uPtr`) is transferred with `give(x)`, not `std::move(x)`. `std::move` on a plain standard-library value is fine. `give` is declared in `<gsCore/gsMemory.h>`. |
 | ID-CXX17 | major | script | No C++17 or later in `src/`, `examples/`, `unittests/`. |
 | ID-GUARD | major | review | `GISMO_ENSURE` validates input and state at construction, setup and API entry: it survives a Release build. `GISMO_ASSERT` states an invariant inside a per-element or per-quadrature-point loop: it costs nothing in Release and checks nothing there. A guard that protects against wrong results or out-of-bounds access and sits in a hot loop should be hoisted out of the loop, not turned into an `ENSURE`. Neither macro may throw inside an OpenMP parallel region. |
 | ID-INIT | major | review | Every data member has a value after every constructor, including the default and copy constructors; prefer a default member initialiser. |
@@ -84,7 +84,7 @@ it. What changed and why belongs in the commit message and the pull request.
 
 | ID | Sev | Checker | Rule |
 |---|---|---|---|
-| CM-NARR | major | script | No narration of the change and no process references, in comments or in string literals (an option description is user-facing text): "previously", "removed the", "replaced by", task or step numbers, "per the spec", review rounds, paths into `.claude/`. |
+| CM-NARR | major | script | No narration of the change to the code, and no process references. In a comment: the history of the code ("it previously…", "no longer needed", "removed the old loop", "replaced by the helper below", "this fix", a comment opening with what was done to the code such as "Added a null check" or "Now uses std::vector") and references to the process that produced it (task or step numbers, "per the spec", review rounds, paths into `.claude/`). In a string literal, which is user-facing text, only the process references. A sentence about what the program does at run time or about an algorithm's own steps ("removed the duplicate knots", "the residual of the previous iteration") is not narration. The script matches phrases and can misjudge one; a writer who meets a finding on such a sentence reports it and does not rewrite the sentence to appease the pattern. |
 | CM-LINEREF | minor | script | A comment does not cite a line number in a source file; the number is wrong after the next edit. Name the function instead. |
 | CM-DEAD | minor | script | No commented-out code. |
 | CM-EMPH | note | script | No emphasis by capital letters in comments. |
@@ -102,6 +102,7 @@ it. What changed and why belongs in the commit message and the pull request.
 | EX-NAME | major | script | *New files.* In core `examples/` a file is `<topic>_example.cpp`. In an optional module it follows that module's existing scheme. |
 | EX-GISMOH | minor | script | *New files.* An example includes `<gismo.h>` and uses `using namespace gismo;`. |
 | EX-CMD | major | style | Options are declared as local variables with defaults and registered with `gsCmdLine` (`addInt`, `addReal`, `addString`, `addSwitch`). The description of each option and the file's header comment say what the code does. |
+| EX-FORMAT | minor | style | An example that reads or writes a file says which format it expects or produces (G+Smo XML, ParaView `.vts`/`.pvd`, CSV with its columns), in the option's description or in the comment at the point of use. |
 | EX-GETVALUES | minor | script | Parsing is `try { cmd.getValues(argc,argv); } catch (int rv) { return rv; }`. |
 | EX-RETURN | minor | script | `main` returns `EXIT_SUCCESS` or `EXIT_FAILURE`. |
 | EX-DEFAULT | major | review | With no arguments the example runs to completion in seconds, so it serves as a smoke test. Verified by running it when the review builds; otherwise marked UNVERIFIED. |
@@ -115,13 +116,13 @@ it. What changed and why belongs in the commit message and the pull request.
 
 | ID | Sev | Checker | Rule |
 |---|---|---|---|
-| UT-NAME | major | script | *New files.* A test file is `<name>_test.cpp`. |
+| UT-NAME | major | script | *New files.* A test file is `<name>_test.cpp`, in `unittests/` for core code and in `optional/<module>/unittests/` for a module's. |
 | UT-INCLUDE | major | script | *New files.* It includes `"gismo_unittest.h"` first. |
 | UT-SUITE | major | script + style | It contains `SUITE(<file name without .cpp>)`. Helpers live in an anonymous namespace inside the suite. |
 | UT-COMMENT | major | style | A test can be reviewed without running it. Each `TEST` opens with a comment naming the property it verifies and where the expected result comes from (an analytic value, a manufactured solution, a reference computed another way). Inside, each block of lines — set up, act, check — has a comment saying what it does, and each expected value or tolerance says where it comes from. See **Commenting examples and tests** below. |
 | UT-FAIL | major | review | Every test can fail. Findings: an assertion on the code's own output, a tolerance loose enough to pass anything, an arm that no input reaches, a skipped case counted as passed. |
 | UT-NDEBUG | major | review | A test of an assertion uses `CHECK_THROW_IN_DEBUG`; `CHECK_THROW` on a `GISMO_ASSERT` fails or reads out of bounds in a Release build. A test that only checks something in Debug says so. |
-| UT-FLOAT | major | style | Floating-point results are compared with `CHECK_CLOSE` and a stated tolerance, never `==`. The exception is a value that is exact by construction — a copy of the entry it is compared with, or an integer count held in a `real_t` — where the test's comment says so. A comparison helper returns infinity when either side is not finite, so that NaN does not pass. |
+| UT-FLOAT | major | style | Floating-point results are compared with `CHECK_CLOSE`, or `CHECK_ARRAY_CLOSE` for arrays, and a stated tolerance, never `==`. The exception is a value that is exact by construction — a copy of the entry it is compared with, or an integer count held in a `real_t` — where the test's comment says so. A comparison helper returns infinity when either side is not finite, so that NaN does not pass. |
 | UT-COVER | major | review | New public API is exercised by a test. A fixed bug has a test that fails without the fix. |
 
 ### Commenting examples and tests
@@ -172,4 +173,20 @@ All checked by `gismo:task-reviewer`; a finding needs the line and the input tha
 | NU-ALLOC | major | No heap allocation per element or per quadrature point: temporaries are sized once outside the loop. |
 | NU-ALIAS | major | Eigen expressions do not alias: `noalias()` only where the destination does not appear on the right, and no `auto` holding an expression whose operands die. |
 | NU-CAST | major | No narrowing cast of `real_t` to an integer type on a value that can be NaN or out of range. |
+| NU-THROW | major | Nothing throws inside a per-element or per-quadrature-point loop: no `throw`, no `GISMO_ENSURE`, no `GISMO_ERROR`, and no call whose failure path throws. Input is validated before the loop; inside it an invariant is a `GISMO_ASSERT` (see ID-GUARD). |
 | NU-COMPLEX | minor | A new algorithm states its complexity in the doxygen of its entry point. |
+
+## 9. Reach into the core library
+
+A feature has a `home`: the directory it lives in, an optional module or a directory under
+`src/`. These rules concern what it changes outside home, and are about files, not lines.
+DS-BUDGET applies only to a feature that has an intrusion budget (`budget.tsv`, written by
+`/gismo:design`), the list of files outside home that it may change; it is decided by
+`skills/design/scripts/intrusion.sh check`, which looks at the whole change and not at one
+task's files. DS-REACH applies to any change and is checked by `gismo:task-reviewer` with
+focus `intrusion`.
+
+| ID | Sev | Checker | Rule |
+|---|---|---|---|
+| DS-REACH | major | review | A change outside home is one the feature needs, in the least intrusive form that serves it. Findings: code that serves only this feature placed in a core file; a core class modified where an extension point it already offers would do; a new hook that knows about the feature or forces existing derived classes or callers to change; a default or a result that changes for code which does not use the feature; an include from core into home; an edit unrelated to the feature. Being listed in the budget does not settle it: the budget says the file may change, not that this change is the smallest. |
+| DS-BUDGET | major | script | A change stays inside its budget. Outside the feature's `home` directories and its `allow` rows, no existing file is modified, deleted or renamed, and no file is created under `src/` or `optional/<module>/src/`. New examples, unit tests and documentation are free. The finding is settled by moving the change into home or by the user widening the budget, never by an agent adding an `allow` row. |

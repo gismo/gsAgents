@@ -791,6 +791,130 @@ def test_review_md_is_never_a_source_of_findings(tmp_path):
     assert len(runs) == 1 and runs[0].text.startswith("Review run")
 
 
+# ---------------------------------------------------------------------------
+# Tolerant headers, rule-ID fields, refuted findings, declared totals
+# ---------------------------------------------------------------------------
+
+
+def _headers(*lines):
+    return "".join(f"{h}\nWhat: w{i}.\nEvidence: e\nDirection: d\n\n" for i, h in enumerate(lines))
+
+
+def test_c1_slightly_off_headers_are_parsed_and_normalised():
+    text = _headers(
+        "### F1 | Major | MEASURED | CM-NARR | a.h:1",
+        "### F2 | minor | measured | CM-DEAD | a.h:2",
+        "###F5 | note | Reasoned | - | a.h:5",
+        "### F6 | BLOCKER | unverified | cm-narr | a.h:6",
+    )
+    got = [(f.number, f.severity, f.evidence, f.rule_id) for f in harvest.parse_review_findings(text)]
+    assert got == [
+        (1, "major", "MEASURED", "CM-NARR"),
+        (2, "minor", "MEASURED", "CM-DEAD"),
+        (5, "note", "REASONED", "-"),
+        (6, "blocker", "UNVERIFIED", "CM-NARR"),
+    ]
+
+
+def test_c1_lowercase_rule_in_lint_line_is_upper_cased():
+    findings = harvest.parse_lint_findings("src/a.h:4\tcm-narr\tmajor\tmsg\n")
+    assert [(f.rule_id, f.severity) for f in findings] == [("CM-NARR", "major")]
+
+
+def test_c2_rule_field_is_one_id_a_list_of_ids_or_no_rule():
+    text = _headers(
+        "### F1 | major | MEASURED | n/a | a.h:1",
+        "### F2 | major | MEASURED | CM-NARR, CM-DEAD | a.h:2",
+        "### F3 | major | MEASURED | cm-narr / ws-trail | a.h:3",
+        "### F4 | major | MEASURED | CM-NARR, junk | a.h:4",
+        "### F5 | major | MEASURED | see above | a.h:5",
+    )
+    got = [f.rule_ids for f in harvest.parse_review_findings(text)]
+    assert got == [["-"], ["CM-NARR", "CM-DEAD"], ["CM-NARR", "WS-TRAIL"], ["-"], ["-"]]
+
+
+def test_c2_junk_rule_ids_stay_out_of_the_ranking(tmp_path):
+    text = _headers(
+        "### F1 | major | MEASURED | n/a | a.h:1",
+        "### F2 | major | MEASURED | CM-NARR, CM-DEAD | a.h:2",
+        "### F3 | minor | MEASURED | CM-NARR | a.h:3",
+    ) + "FINDINGS: 3 (blocker 0, major 2, minor 1, note 0)\n"
+    _review_dir(tmp_path, "20261101-0900", agent=text, summary="# R\n")
+    _, records, _ = harvest.build_records([tmp_path], since=None)
+    ranked = {s["rule_id"]: (s["runs"], s["findings"]) for s in harvest.rank_rule_ids(records)}
+    assert ranked == {"CM-NARR": (1, 2), "CM-DEAD": (1, 1)}
+
+
+_REFUTE = (
+    "### style.md F1 | refuted\nEvidence: caller guards it.\n\n"
+    "### findings/style.md F2 | upheld\nEvidence: x\n\n"
+    "### other.md F1 | refuted\nEvidence: unrelated file\n\n"
+    "FINDINGS: 0 (blocker 0, major 0, minor 0, note 0)\n"
+)
+
+
+def test_c3_refuted_findings_are_not_counted_and_are_reported(tmp_path):
+    agent = (
+        "### F1 | major | MEASURED | CM-NARR | a.h:1\nWhat: a.\n\n"
+        "### F2 | major | MEASURED | CM-DEAD | a.h:2\nWhat: b.\n\n"
+        "FINDINGS: 2 (blocker 0, major 2, minor 0, note 0)\n"
+    )
+    d = _review_dir(tmp_path, "20261101-0900", agent=agent, summary="# R\n")
+    (d / "findings" / "refute.md").write_text(_REFUTE)
+    out_dir = tmp_path / "out"
+    harvest.harvest([tmp_path], out_dir, since=None)
+    summary = (out_dir / "summary.md").read_text()
+    assert "| CM-DEAD | 1 | 1 | major | 1 |" in summary
+    assert "CM-NARR |" not in summary
+    assert "Findings excluded as refuted: 1" in summary
+
+
+def _declared_mismatch_dir(tmp_path):
+    agent = (
+        "### F1 | major | MEASURED | CM-NARR | a.h:1\nWhat: a.\n\n"
+        "### F2 | minor | MEASURED | CM-DEAD | a.h:2\nWhat: b.\n\n"
+        "FINDINGS: 3 (blocker 0, major 2, minor 1, note 0)\n"
+    )
+    return _review_dir(tmp_path, "20261101-0900", agent=agent, summary="# R\n")
+
+
+def test_c4_declared_total_is_compared_with_parsed_findings():
+    text = "### F1 | major | MEASURED | CM-NARR | a.h:1\nWhat: a.\n\nFINDINGS: 2 (blocker 0, major 1, minor 1, note 0)\n"
+    findings = harvest.parse_review_findings(text)
+    msg = harvest.check_declared_counts("style.md", text, findings)
+    assert msg is not None and "style.md" in msg
+    assert "declared 2 (blocker 0, major 1, minor 1, note 0)" in msg
+    assert "parsed 1 (blocker 0, major 1, minor 0, note 0)" in msg
+    ok = text.replace("FINDINGS: 2 (blocker 0, major 1, minor 1", "FINDINGS: 1 (blocker 0, major 1, minor 0")
+    assert harvest.check_declared_counts("style.md", ok, findings) is None
+
+
+def test_c4_missing_closing_line_is_a_warning():
+    text = "### F1 | major | MEASURED | CM-NARR | a.h:1\nWhat: a.\n"
+    msg = harvest.check_declared_counts("style.md", text, harvest.parse_review_findings(text))
+    assert msg is not None and "no FINDINGS line" in msg
+
+
+def test_c4_mismatch_is_visible_in_summary_and_stdout(tmp_path, capsys):
+    d = _declared_mismatch_dir(tmp_path)
+    out_dir = tmp_path / "out"
+    assert harvest.main(["--roots", str(tmp_path), "--out", str(out_dir)]) == 0
+    stdout = capsys.readouterr().out
+    summary = (out_dir / "summary.md").read_text()
+    for where in (stdout, summary):
+        assert str(d / "findings" / "style.md") in where
+        assert "declared 3" in where and "parsed 2" in where
+    assert "## Warnings" in summary
+
+
+def test_c4_consistent_files_produce_no_warning(tmp_path, capsys):
+    _review_dir(tmp_path, "20261101-0900", agent=_FINDING_FILE, summary="# R\n")
+    out_dir = tmp_path / "out"
+    harvest.main(["--roots", str(tmp_path), "--out", str(out_dir)])
+    assert "Warnings" not in (out_dir / "summary.md").read_text()
+    assert "warning" not in capsys.readouterr().out.lower()
+
+
 def test_lint_note_rows_are_not_harvested():
     findings = harvest.parse_lint_findings(
         "src/a.h:1\tID-INTLOOP\tnote\tloop variable of type 'int'\n"

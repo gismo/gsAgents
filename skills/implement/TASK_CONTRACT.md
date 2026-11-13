@@ -436,7 +436,7 @@ It runs the closed loop as nested subagents (Claude Code >= 2.1.172):
    b. `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh <every touched file>` — the
       conventions in `${CLAUDE_PLUGIN_ROOT}/skills/review/CONVENTIONS.md` that a script can decide.
       Fix every `major` and `minor` finding before going on (it only reports lines your diff added
-      or changed), then re-run until `STATUS: OK`. A `note` line does not block and is yours to judge: act on it only when it is a real defect under the rulebook (a `std::move` of a standard-library value, or a capitalised acronym, is not). It is cheap, and a finding left for the reviewer costs a repair round.
+      or changed), then re-run, three runs at most. A finding still reported after that is either one you cannot fix inside your files or one you judge the script got wrong: stop, and name it in your report with its line and your reason, so the reviewer decides. A pattern-based rule can misfire, and a loop that only ends on `STATUS: OK` would then never end. A `note` line does not block and is yours to judge: act on it only when it is a real defect under the rulebook (a `std::move` of a standard-library value, or a capitalised acronym, is not). It is cheap, and a finding left for the reviewer costs a repair round.
    c. `bash ${CLAUDE_PLUGIN_ROOT}/skills/build-target/scripts/build_target.sh <build target>`
    d. the task's test command
 
