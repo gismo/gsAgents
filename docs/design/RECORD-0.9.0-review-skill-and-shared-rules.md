@@ -93,6 +93,9 @@ corpus `skills/diagnose` mines). Three things stood out:
   Delete/Keep judgement and the style checker remain.
 - `GISMO_NDEBUG` is `unknown` when neither `CMakeCache.txt` nor `compile_commands.json` decides it, and
   agents then make no claim that an assertion was exercised.
+- `EX-GETVALUES` looks back at most 15 lines of code for `try` instead of tracking scope; a `try` that
+  far above, or a `catch` handled elsewhere, is not recognised.
+- `GISMO_NDEBUG` is `1` if any compile command defines NDEBUG; per-target disagreement is not detected.
 - The level costs are qualitative. No per-level token measurement exists yet; a first batch of real
   reviews, mined with `/gismo:diagnose`, is what would justify retuning the levels.
 - `skills/diagnose/scripts/test_harvest.py` has 46 tests (it had 41 at 0.8.0, see

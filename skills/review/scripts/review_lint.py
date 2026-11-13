@@ -350,6 +350,26 @@ def main_body_lines(infos: Sequence[LineInfo]) -> Set[int]:
     return inside
 
 
+EX_TRY_LOOKBACK = 15
+
+
+def _in_try(infos: Sequence[LineInfo], idx: int) -> bool:
+    """Whether line ``idx`` (0-based) is covered by a ``try``.
+
+    A ``try`` on the line itself counts. Otherwise the lexed code of at most
+    :data:`EX_TRY_LOOKBACK` earlier lines is scanned newest first: a ``try`` covers the line,
+    a ``catch`` seen first closes it. A heuristic; brace scopes are not tracked.
+    """
+    for k in range(idx, max(-1, idx - 1 - EX_TRY_LOOKBACK), -1):
+        code = infos[k].code
+        t, c = re.search(r"\btry\b", code), re.search(r"\bcatch\b", code)
+        if c and k < idx and (not t or c.start() > t.start()):
+            return False
+        if t:
+            return True
+    return False
+
+
 def dx_hits(lines: Sequence[str], infos: Sequence[LineInfo]) -> List[Tuple[int, int, str]]:
     """Find backslash doxygen commands inside doxygen comments.
 
@@ -361,11 +381,11 @@ def dx_hits(lines: Sequence[str], infos: Sequence[LineInfo]) -> List[Tuple[int, 
     :returns: ``(line index, column of the backslash, command name)`` triples
     """
     hits: List[Tuple[int, int, str]] = []
-    inline = display = False
+    inline = display = code_block = False
     for idx, (line, info) in enumerate(zip(lines, infos)):
         doxy_segs = [s for s in info.segs if s.doxy]
         if not doxy_segs:
-            inline = display = False
+            inline = display = code_block = False
             continue
         for seg in doxy_segs:
             for m in DX_TOKEN_RE.finditer(line, seg.start, seg.end):
@@ -378,9 +398,18 @@ def dx_hits(lines: Sequence[str], infos: Sequence[LineInfo]) -> List[Tuple[int, 
                     display = False
                 elif lead == "\\" and not inline and not display and name in DX_COMMANDS \
                         and not (m.start(1) > 0 and (line[m.start(1) - 1].isalnum() or line[m.start(1) - 1] == "_")):
-                    hits.append((idx, m.start(1), name))
+                    if name in ("endcode", "endverbatim"):
+                        code_block = False
+                        hits.append((idx, m.start(1), name))
+                    elif not code_block:
+                        hits.append((idx, m.start(1), name))
+                        code_block = name in ("code", "verbatim")
+                elif name in ("code", "verbatim"):
+                    code_block = True
+                elif name in ("endcode", "endverbatim"):
+                    code_block = False
             if seg.kind == "block" and seg.ends:
-                inline = display = False
+                inline = display = code_block = False
     return hits
 
 
@@ -487,15 +516,32 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
     def add(ln: int, rule: str, msg: str, severity: Optional[str] = None) -> None:
         out.append(Finding(path, ln, rule, msg, severity))
 
-    crlf = [i + 1 for i, l in enumerate(raw_lines) if l.endswith("\r") and (i + 1) in sel]
+    infos = None if ws_only else lex(lines)
+
+    def ws_exempt(ln: int) -> Tuple[bool, bool]:
+        """Return (leading, trailing) exemption of line ``ln`` from the whitespace rules.
+
+        Leading blanks are data on a line that starts inside a raw string; trailing blanks
+        only on a line that ends inside one. A line following a backslash-newline may
+        continue a string literal, so both are left alone.
+        """
+        if infos is None:
+            return False, False
+        if ln > 1 and lines[ln - 2].endswith("\\"):
+            return True, True
+        return ln > 1 and infos[ln - 2].in_raw_end, infos[ln - 1].in_raw_end
+
+    crlf = [i + 1 for i, l in enumerate(raw_lines)
+            if l.endswith("\r") and (i + 1) in sel and not ws_exempt(i + 1)[1]]
     if crlf:
         add(crlf[0], "WS-CRLF", "CRLF line ending (%d line%s)" % (len(crlf), "s" if len(crlf) > 1 else ""))
     for ln in sorted(sel):
         line = lines[ln - 1]
+        skip_lead, skip_trail = ws_exempt(ln)
         stripped = line.lstrip(" \t")
-        if "\t" in line[:len(line) - len(stripped)]:
+        if not skip_lead and "\t" in line[:len(line) - len(stripped)]:
             add(ln, "WS-TAB", "tab in leading indentation")
-        if line != line.rstrip(" \t"):
+        if not skip_trail and line != line.rstrip(" \t"):
             add(ln, "WS-TRAIL", "trailing whitespace")
     added = len(sel)
     if ws_only:
@@ -504,7 +550,6 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
             comment_lines = sum(1 for n in sel if lines[n - 1].lstrip().startswith("#"))
         return out, added, comment_lines
 
-    infos = lex(lines)
     comment_lines = sum(1 for n in sel if infos[n - 1].segs and not infos[n - 1].code.strip())
     code_words: Set[str] = set()
     for info in infos:
@@ -571,8 +616,7 @@ def lint_text(path: str, data: str, status: str, changed: Optional[Set[int]],
                 and re.match(r'\s*#\s*include\s*["<][^">]*\.cpp[">]', line):
             add(ln, "EX-INCLUDE", "example includes another .cpp")
         if re.search(r"\.getValues\s*\(\s*argc\b", code):
-            prev = " ".join(infos[k].code for k in range(max(0, ln - 3), ln))
-            if not re.search(r"\btry\b", prev):
+            if not _in_try(infos, ln - 1):
                 add(ln, "EX-GETVALUES", "getValues(argc, ...) must be inside try")
 
     for ln, col, tag in dx_hits(lines, infos):
@@ -772,10 +816,12 @@ def external_findings(kind: str, binary: List[str], root: str, build_dir: str, p
     except (OSError, subprocess.TimeoutExpired) as e:
         return [], str(e)
     out: List[Finding] = []
+    matched = False
     for l in (r.stdout + "\n" + r.stderr).splitlines():
         m = rx.match(l)
         if not m:
             continue
+        matched = True
         ln = int(m.group(2))
         if changed is not None and ln not in changed:
             continue
@@ -786,6 +832,8 @@ def external_findings(kind: str, binary: List[str], root: str, build_dir: str, p
         else:
             msg = "%s [%s]" % (m.group(4).strip(), m.group(3))
         out.append(Finding(path, ln, rule, msg))
+    if r.returncode != 0 and not matched:
+        return out, (r.stderr.strip().splitlines() or ["exit %d" % r.returncode])[0]
     return out, None
 
 

@@ -128,6 +128,7 @@ gismo_env() {
     # there although the type looks like a release. Order of evidence:
     #   1. CMakeCache.txt: -DNDEBUG in CMAKE_CXX_FLAGS or CMAKE_CXX_FLAGS_<TYPE>.
     #   2. compile_commands.json: any -DNDEBUG among the real compile commands.
+    # A source that also carries -UNDEBUG leaves the answer `unknown`.
     # 1 if either source carries it; 0 if a flag source exists (a non-empty
     # CMAKE_BUILD_TYPE, or compile_commands.json) and none does; unknown otherwise.
     # A pre-set GISMO_BUILD_TYPE / GISMO_NDEBUG wins, like the other variables.
@@ -140,10 +141,15 @@ gismo_env() {
         fi
         # -DNDEBUG may also come from add_definitions() and appear only in the compile
         # commands, so the cache alone settles the answer only when it says 1.
+        # Only the whole token -DNDEBUG counts (not -DNDEBUG_X), and any -UNDEBUG in a
+        # source makes its answer undecidable.
         [ -n "$btype" ] && nd=0
-        case "$flags $tflags" in *-DNDEBUG*) nd=1 ;; esac
-        if [ "$nd" != 1 ] && [ -s "$GISMO_BUILD_DIR/compile_commands.json" ]; then
-            if grep -q -m1 -e '-DNDEBUG' "$GISMO_BUILD_DIR/compile_commands.json" 2>/dev/null; then nd=1; else nd=0; fi
+        printf '%s\n' "$flags $tflags" | _gismo_flag_token -DNDEBUG && nd=1
+        printf '%s\n' "$flags $tflags" | _gismo_flag_token -UNDEBUG && nd=unknown
+        if [ "$nd" != 1 ] && [ "$nd" != unknown ] && [ -s "$GISMO_BUILD_DIR/compile_commands.json" ]; then
+            if _gismo_flag_token -UNDEBUG < "$GISMO_BUILD_DIR/compile_commands.json"; then nd=unknown
+            elif _gismo_flag_token -DNDEBUG < "$GISMO_BUILD_DIR/compile_commands.json"; then nd=1
+            else nd=0; fi
         fi
         [ -z "${GISMO_BUILD_TYPE:-}" ] && GISMO_BUILD_TYPE="${btype:-unknown}"
         [ -z "${GISMO_NDEBUG:-}" ] && GISMO_NDEBUG="$nd"
@@ -151,6 +157,12 @@ gismo_env() {
     case "$GISMO_NDEBUG" in 0|1|unknown) ;; *) GISMO_NDEBUG=unknown ;; esac
     export GISMO_BUILD_TYPE GISMO_NDEBUG
     return 0
+}
+
+# Succeeds if stdin contains the whole flag token $1: not preceded by a word character
+# and followed by whitespace, `=`, a quote, a backslash (JSON escape) or end of line.
+_gismo_flag_token() {
+    grep -q -E -e "(^|[^A-Za-z0-9_])$1([[:space:]=\"'\\\\]|$)"
 }
 
 # Value of a CMake cache entry (any type), empty if absent. Entries look like

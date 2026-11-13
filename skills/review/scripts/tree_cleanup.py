@@ -7,8 +7,11 @@ Passes:
 
 ``whitespace``
     strip trailing whitespace, expand each tab in *leading* indentation to four spaces and
-    convert CRLF to LF. Tabs after the first non-blank character are only counted. Lines that
-    start or end inside a raw string literal are left alone, since their whitespace is data.
+    convert CRLF to LF. Tabs after the first non-blank character are only counted. Whitespace
+    inside a raw string literal is data: a line that starts and ends inside one is left alone, the
+    line closing one keeps its leading blanks, the line opening one keeps its trailing blanks;
+    so are the blanks of a line that follows a backslash-newline, which may continue a string
+    literal.
 ``doxygen-tags``
     rewrite ``\\cmd`` to ``@cmd`` for the commands in ``review_lint.DX_COMMANDS``, inside
     doxygen comments only and never inside formula delimiters (``\\f$ .. \\f$``,
@@ -56,23 +59,26 @@ def clean_whitespace(data: str) -> Tuple[str, Dict[str, int]]:
     infos = lex(bodies)
     out: List[str] = []
     for i, part in enumerate(parts):
-        if i > 0 and infos[i - 1].in_raw_end:
+        starts_in_raw = i > 0 and infos[i - 1].in_raw_end
+        ends_in_raw = infos[i].in_raw_end
+        if starts_in_raw and ends_in_raw:
             out.append(part)
             continue
         has_cr = part.endswith("\r")
         body = bodies[i]
-        ends_in_raw = infos[i].in_raw_end
+        continued = i > 0 and bodies[i - 1].endswith("\\")
         if not ends_in_raw:
-            stripped = body.rstrip(" \t")
-            if stripped != body:
-                counts["trail"] += 1
-                body = stripped
+            if not continued:
+                stripped = body.rstrip(" \t")
+                if stripped != body:
+                    counts["trail"] += 1
+                    body = stripped
             if has_cr:
                 counts["crlf"] += 1
                 has_cr = False
         lead_len = len(body) - len(body.lstrip(" \t"))
         lead = body[:lead_len]
-        if "\t" in lead:
+        if "\t" in lead and not continued and not starts_in_raw:
             counts["tabs"] += lead.count("\t")
             body = lead.replace("\t", " " * INDENT_WIDTH) + body[lead_len:]
         counts["inline_tabs"] += body.lstrip(" ").count("\t")
@@ -312,7 +318,6 @@ def run(argv: Optional[List[str]] = None) -> int:
             print("OFFENDER\t%s" % b)
         print("STATUS: FAIL proof")
         return 1
-    print("STATUS: OK %d files changed" % totals["files"])
     if ns.mode == "whitespace":
         msg = "style: strip trailing whitespace, expand leading tabs, normalise line endings"
         body = "Mechanical cleanup by tree_cleanup.sh whitespace; git diff -w is empty."
@@ -321,6 +326,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         body = "Mechanical cleanup by tree_cleanup.sh doxygen-tags; only '\\' -> '@' before listed commands."
     print("Suggested commit message:\n  %s\n\n  %s" % (msg, body))
     print("Reminder: add the new commit hash to .git-blame-ignore-revs.")
+    print("STATUS: OK %d files changed" % totals["files"])
     return 0
 
 

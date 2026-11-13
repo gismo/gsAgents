@@ -28,7 +28,7 @@ This skill has three jobs, chosen by the first argument:
 
 **Target.** Nothing: the working diff, including untracked files. A git ref: everything since the merge base with it. `pr <N>`: resolve the PR's base and head with `gh pr view <N> --json baseRefName,headRefName`; the head must be the branch that is checked out — if it is not, stop and say which branch to check out, never check it out yourself. One or more paths: restrict the diff to them.
 
-When the target is open — the working diff holds untracked files that are evidently not part of the change (scratch drivers, plans, build output), or the branch has an open pull request and the tree also carries uncommitted edits — ask once what to review, offering the pull request or branch diff, the uncommitted edits, or both, and pass the chosen files to the scripts as paths. Every changed file left out is named on the report's `Excluded` line, so that a reader does not take the review to cover it.
+When the target is open — the working diff holds untracked files that are evidently not part of the change (scratch drivers, plans, build output), or the branch has an open pull request and the tree also carries uncommitted edits — ask once what to review, offering the pull request or branch diff, the uncommitted edits, or both, and pass the chosen files to the scripts as paths. Every changed file left out is named on the report's `Excluded` line, so that a reader does not take the review to cover it. When the user picks the branch only and a selected file also has uncommitted edits, say so and ask them to commit or stash first (the review itself does no git writes); if they decline, list those files on the `Excluded` line as "mixed (uncommitted edits present)".
 
 The request may carry a question of the user's own ("is this edit worth including?"). It does not change what the reviewers are given. Answer it in the report's `## Your question` section, from the findings.
 
@@ -59,7 +59,17 @@ mkdir -p D/input D/findings D/debate D/logs
 bash $S/review_scope.sh [--base <ref>] [<path>…]              > D/input/scope.tsv
 bash $S/review_scope.sh --lines [--base <ref>] [<path>…]      > D/input/lines.tsv
 bash $S/review_lint.sh [--base <ref>] [--linters] [<path>…]   > D/input/lint.tsv
-git diff [<merge base>] | md5sum                               > D/input/diff.md5
+```
+
+Then record what was reviewed in `D/input/diff.md5`: the lines `target: <the target as given, or "working diff">` and `base: <merge base, or HEAD>`, `paths: <the path list given to the scripts, or all>`, then `md5: ` and the hash of this, run from the gismo root:
+
+```
+{ cat D/input/scope.tsv
+  awk -F'\t' 'NF>=3 && $1=="." {print $3}' D/input/scope.tsv | xargs -d '\n' -r git diff <base> --
+  for r in $(awk -F'\t' 'NF>=3 && $1!="." {print $1}' D/input/scope.tsv | sort -u); do
+    awk -F'\t' -v r=$r '$1==r {print substr($3,length(r)+2)}' D/input/scope.tsv | xargs -d '\n' -r git -C $r diff HEAD --; done
+  awk -F'\t' 'NF>=3 && $2!="D" {print $3}' D/input/scope.tsv | xargs -d '\n' -r cat
+} | md5sum
 ```
 
 Redirect stdout only, exactly as written. The scripts print notices on stderr — for instance that `--base` does not apply to a nested repository — and `2>&1` would put them inside the TSV. An input file that came out wrong is regenerated, never edited.
@@ -68,7 +78,7 @@ The scope script also sees changes inside `optional/` modules that are their own
 
 `review_lint.sh` ends with `STATUS: OK` when it has no major or minor finding; notes may still be listed above it.
 
-Then run `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <changed C++ files>`, leaving out files whose status in `scope.tsv` is `D`, and keep its output as `D/input/syntax.txt`. A file that does not compile is a `blocker` when the file is new or an error sits on a line listed in `lines.tsv`, and there is no point reviewing the rest at depth until it does: write the report with that one finding and stop. A failure whose errors all sit on lines the change did not touch was there before the change: it is not a finding. Record it under **Build and test** and **Not checked**, with the lines, and go on. A header the script reports as OK but not self-contained, and a file it reports as `SKIP` for want of compile flags (the run then ends `STATUS: INCOMPLETE`), are likewise recorded under **Not checked** and do not stop the review.
+Then run `bash ${CLAUDE_PLUGIN_ROOT}/skills/syntax-check/scripts/syntax_check.sh <changed C++ files>`, leaving out files whose status in `scope.tsv` is `D`, and keep its output as `D/input/syntax.txt`. A file that does not compile is a `blocker` when the file is new or an error sits on a line listed in `lines.tsv`, and there is no point reviewing the rest at depth until it does: write the report with that one finding and stop. A failure whose errors all sit on lines the change did not touch was there before the change: it is not a finding, provided the change removes or renames no declaration, `#include`, macro or function signature; if it does, record the failure as a `blocker` with origin unresolved. Otherwise record it under **Build and test** and **Not checked**, with the lines, and go on. A header the script reports as OK but not self-contained, and a file it reports as `SKIP` for want of compile flags (the run then ends `STATUS: INCOMPLETE`), are likewise recorded under **Not checked** and do not stop the review.
 
 ## 2. Dispatch reviewers
 
@@ -82,9 +92,10 @@ Dispatch the agents of a step in one message so they run concurrently. Each is g
 | large, ultra | `gismo:task-reviewer` | diff mode, `focus: numerics` | `findings/numerics.md` |
 | large, ultra | `gismo:task-reviewer` | diff mode, `focus: tests-docs` | `findings/tests-docs.md` |
 
-Every reviewer dispatch also states `run: yes` or `run: no`. When step 3 applies, do it first so the reviewers go out with `run: yes`; the style checker needs no binary and goes out together with the builder.
+Every reviewer dispatch also states `run: yes` or `run: no`. When step 3 applies, do its items 1 to 4 first so the reviewers go out with `run: yes`; the style checker needs no binary and goes out together with the builder.
 
 Every `gismo:task-reviewer` brief also states, in these terms, what the agent cannot know from its own file:
+- **The base ref** (the merge base, or HEAD) the fingerprint recorded; the `mutation` focus diffs against it.
 - **The level, and the test budget it implies.** Below ultra a reviewer runs only suites filtered to the changed files. When step 3 ran, it has already run them once: give its result (suites, pass counts), so that a reviewer runs a suite again only to observe a specific attack. The full suite is run at ultra only, and by step 3.
 - **Where scratch goes.** Attack drivers, their binaries and copies of base-revision files go under `/tmp`. `D` receives the reviewer's finding file and the logs `run_logged.sh` writes, nothing else, and the source tree receives nothing.
 - **No git command that writes,** `git fetch` included.
@@ -100,11 +111,12 @@ Delegate; you want the verdict, not the log. What these agents return goes into 
 **ultra only**
 
 4. `gismo:debugger` — each changed example under valgrind with its default arguments.
-5. `gismo:indexer` — "which callers outside these files use these symbols?", with the list under `## Public symbols changed` in `findings/correctness.md`. Give its answer to the refutation pass.
+
+The callers lookup (ultra) runs in step 4, once the correctness reviewer has returned.
 
 ## 4. Refute (ultra)
 
-Once the finding files exist, dispatch one `gismo:task-reviewer` in diff mode with `focus: refute`. It marks every finding `upheld`, `refuted` or `undecided` in `findings/refute.md`. A refuted finding leaves the main body of the report and is listed under **Refuted** with the reason, so the user can see what was considered.
+Once the finding files exist, at ultra first dispatch `gismo:indexer` — "which callers outside these files use these symbols?", with the list under `## Public symbols changed` in `findings/correctness.md` — and give its answer to the refutation pass. Then dispatch one `gismo:task-reviewer` in diff mode with `focus: refute`. It marks every finding `upheld`, `refuted` or `undecided` in `findings/refute.md`. A refuted finding leaves the main body of the report and is listed under **Refuted** with the reason, so the user can see what was considered.
 
 ## 5. Debate (ultra; large with `--debate`)
 
@@ -189,7 +201,7 @@ Then tell the user, in a few lines: the headline counts, the blockers and majors
 
 The order matters: a decision can make smaller findings moot, and edits shift line numbers, so decisions come first and the mechanical batch last. Nothing is changed before the user has said yes to that step, and the reviewers never fix their own findings — fixes go through the implementing agents and their own review.
 
-1. **Check the report is current.** Recompute the diff's md5 as in step 1 and compare with `input/diff.md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
+1. **Check the report is current.** Recompute the hash as in step 1 from the `target`, `base` and `paths` recorded in `input/diff.md5` (regenerate `scope.tsv` with them first) and compare it with the recorded `md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
 2. **Show the triage counts** and name the `info` findings in a line each; nothing is asked about them. Then put the `confirm` findings to the user as one list — a line each, saying what would be changed — and ask once whether to fix them all or which to discuss first. Say in the question that these rest on a reviewer's reading, not on something that was run. Those picked out join the `decision` findings; the rest are recorded as `fix`. Then take the `decision` findings, most severe first, a few at a time. For each, in plain words and without file-and-line detail in the question: what is at stake, what happens under each option, and your recommendation. A debate ruling is the recommendation where there is one, with the argument against it. When the user asks what a finding means instead of answering, explain it — what the code does today and the evidence — and ask again. The user answers:
    - `fix` (and how, where there is a choice);
    - `accept` — the code stays; record why;
