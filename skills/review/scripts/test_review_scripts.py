@@ -176,14 +176,19 @@ def md5(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
 
 
+def blob(root: Path, rev: str, rel: str) -> str:
+    return git(root, "rev-parse", f"{rev}:{rel}").strip()
+
+
 def test_a3_digest_value(root: Path) -> None:
+    basis, other = blob(root, "HEAD", "src/gsCore/gsBasis.h"), blob(root, "HEAD", "src/gsCore/gsOther.cpp")
     write(root, "src/gsCore/gsBasis.h", "new\n")
     write(root, "src/gsCore/gsNew.h", "x\n")
     (root / "src/gsCore/gsOther.cpp").unlink()
-    expected = "".join(f"{s} {p} {h}\n" for s, p, h in sorted([
-        ("M", "src/gsCore/gsBasis.h", md5("new\n")),
-        ("A", "src/gsCore/gsNew.h", md5("x\n")),
-        ("D", "src/gsCore/gsOther.cpp", "-"),
+    expected = "".join(f"{s} {p} {h} {b} {bm} {cm}\n" for s, p, h, b, bm, cm in sorted([
+        ("M", "src/gsCore/gsBasis.h", md5("new\n"), basis, "100644", "f"),
+        ("A", "src/gsCore/gsNew.h", md5("x\n"), "-", "-", "f"),
+        ("D", "src/gsCore/gsOther.cpp", "-", other, "100644", "-"),
     ]))
     assert digest(root) == md5(expected)
 
@@ -218,11 +223,34 @@ def test_a3_digest_honours_path_restriction_and_base(root: Path) -> None:
     commit_all(root)
     write(root, "src/gsCore/gsNew.h", "x\n")
     only = digest(root, "src/gsCore/gsNew.h")
-    assert only == md5("A src/gsCore/gsNew.h %s\n" % md5("x\n"))
+    assert only == md5("A src/gsCore/gsNew.h %s - - f\n" % md5("x\n"))
     both = digest(root, "--base", "main")
-    assert both == md5("A src/gsCore/gsNew.h %s\nM src/gsCore/gsBasis.h %s\n"
-                       % (md5("x\n"), md5("committed\n")))
+    assert both == md5("A src/gsCore/gsNew.h %s - - f\nM src/gsCore/gsBasis.h %s %s 100644 f\n"
+                       % (md5("x\n"), md5("committed\n"),
+                          blob(root, "main", "src/gsCore/gsBasis.h")))
     assert digest(root) != both
+
+
+def test_a3_digest_sees_the_base_side(root: Path) -> None:
+    write(root, "src/gsCore/gsBasis.h", "v1\n")
+    commit_all(root, "v1")
+    write(root, "src/gsCore/gsBasis.h", "v2\n")
+    commit_all(root, "v2")
+    write(root, "src/gsCore/gsBasis.h", "work\n")
+    assert digest(root, "--base", "HEAD~1") != digest(root, "--base", "HEAD~2")
+
+
+def test_a3_digest_ignores_base_changes_outside_the_scope(root: Path) -> None:
+    git(root, "checkout", "-q", "-b", "feat")
+    write(root, "src/gsCore/gsBasis.h", "work\n")
+    commit_all(root, "w")
+    before = digest(root, "--base", "main")
+    git(root, "checkout", "-q", "main")
+    write(root, "src/gsCore/gsOther.cpp", "int b;\n")
+    commit_all(root, "unrelated")
+    git(root, "checkout", "-q", "feat")
+    git(root, "rebase", "-q", "main")
+    assert digest(root, "--base", "main") == before
 
 
 def test_a3_digest_of_nothing_is_stable(root: Path) -> None:

@@ -48,7 +48,7 @@ Everything a review produces lives in one directory:
 <gismo-root>/.claude/plans/<slug>/review/<YYYYMMDD-HHMM>/
   review.md        the report
   decisions.md     written by the resolve step, as are fix-plan.md, handover-R<n>-*.md and comment-R<n>.md
-  input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5
+  input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5  args
                    budget.tsv (the budget check, when the feature has a budget)
                    intrusion.tsv, and budget-draft.tsv when there is no budget (large, ultra)
   findings/        one file per reviewer
@@ -62,11 +62,13 @@ Everything a review produces lives in one directory:
 
 ```
 mkdir -p D/input D/findings D/debate D/logs D/run D/mutation
-bash $S/review_scope.sh [--base <ref>] [<path>…]              > D/input/scope.tsv
-bash $S/review_scope.sh --lines [--base <ref>] [<path>…]      > D/input/lines.tsv
-bash $S/review_lint.sh [--base <ref>] [--nested-base <module>=<ref>]… [--linters] [<path>…]   > D/input/lint.tsv
-bash $S/review_scope.sh --digest [--base <ref>] [<path>…]      > D/input/diff.md5
+bash $S/review_scope.sh [--base <ref>] [--nested-base <module>=<ref>]… [<path>…]             > D/input/scope.tsv
+bash $S/review_scope.sh --lines [--base <ref>] [--nested-base <module>=<ref>]… [<path>…]     > D/input/lines.tsv
+bash $S/review_lint.sh [--base <ref>] [--nested-base <module>=<ref>]… [--linters] [<path>…]  > D/input/lint.tsv
+bash $S/review_scope.sh --digest [--base <ref>] [--nested-base <module>=<ref>]… [<path>…]    > D/input/diff.md5
 ```
+
+Resolve each module's base once before these commands, and pass identical `--base`, `--nested-base` and path arguments to all four. Write them to `D/input/args`, one argument per line, as passed; every later recomputation of the scope or the digest reads them back with `mapfile -t args < D/input/args` and passes `"${args[@]}"`, so a path or ref with a space survives.
 
 `--digest` prints one md5 over the status and content of every changed file, untracked files and nested repositories included, which a `git diff | md5sum` at the root would miss. Redirect stdout only, exactly as written. The scripts print notices on stderr — for instance that `--base` does not apply to a nested repository — and `2>&1` would put them inside the TSV. An input file that came out wrong is regenerated, never edited.
 
@@ -218,7 +220,7 @@ Then tell the user, in a few lines: the headline counts, the blockers and majors
 
 The order matters: a decision can make smaller findings moot, and edits shift line numbers, so decisions come first and the mechanical batch last. Nothing is changed before the user has said yes to that step, and the reviewers never fix their own findings — fixes go through the implementing agents and their own review.
 
-1. **Check the report is current.** Run `review_scope.sh --digest` with the arguments of step 1 and compare with `input/diff.md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
+1. **Check the report is current.** Run `review_scope.sh --digest` with the arguments in `input/args` and compare with `input/diff.md5`. If the change has moved on, say so: locations may be stale, and a fresh `light` review is the cheap way to refresh them. Continue only if the user wants to.
 2. **Show the triage counts** and name the `info` findings in a line each; nothing is asked about them. Then put the `confirm` findings to the user as one list — a line each, saying what would be changed — and ask once whether to fix them all or which to discuss first. Say in the question that these rest on a reviewer's reading, not on something that was run. Those picked out join the `decision` findings; the rest are recorded as `fix`. Then take the `decision` findings, most severe first, a few at a time. For each, in plain words and without file-and-line detail in the question: what is at stake, what happens under each option, and your recommendation. A debate ruling is the recommendation where there is one, with the argument against it. When the user asks what a finding means instead of answering, explain it — what the code does today and the evidence — and ask again. The user answers:
    - `fix` (and how, where there is a choice);
    - `accept` — the code stays; record why. For a `DS-BUDGET` finding the code can only stay if the budget is widened, so `accept` there is the user widening it: make the four edits listed under "Only the user widens the budget" in `${CLAUDE_PLUGIN_ROOT}/skills/design/SKILL.md`, and record the reason in both places. Say this in the question, so the user knows the answer changes the budget;

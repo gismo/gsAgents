@@ -629,6 +629,21 @@ def test_measure_prints_the_same_skip_rows(root: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_nested_file_with_a_tab_in_its_name(root: Path) -> None:
+    name = "src/gsMod/a\tb.h"
+    write(root, "optional/gsMod/" + name, "#pragma once\nint a;\nint b;\n")
+    rc, out, _ = intrusion(root, "check", budget(root, BASIC))
+    assert rc == 0 and out[-1] == "STATUS: OK", out
+    assert finding_paths(out) == []
+    rc, out, _ = intrusion(root, "measure", budget(root, BASIC))
+    assert rc == 0, out
+    assert rows(out, "FILE") == []
+    rc, out, _ = intrusion(root, "measure", budget(root, "home src/gsCore/\n"))
+    assert rc == 0, out
+    file_rows = rows(out, "FILE")
+    assert len(file_rows) == 1 and "\tadded=3\tremoved=0\t" in file_rows[0], out
+
+
 def test_measure_counts(root: Path) -> None:
     write(root, "src/gsCore/gsBasis.h",
           '#pragma once\nclass gsBasis {};\n#include <gsMod/gsMod.h>\nvirtual void f();\n'

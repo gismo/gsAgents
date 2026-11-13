@@ -31,8 +31,9 @@ Flag resolution per file (once compile_commands.json is confirmed to exist):
 A file with no flags from any of these is reported "SKIP" and the run continues.
 
 Headers (.h/.hpp) cannot be compiled directly, so they are checked through a
-temporary TU that just #includes them; on failure they get one retry with gismo.h
-force-included (see check_file). A new .h file (untracked or added relative to HEAD)
+temporary TU that #includes them after gsForwardDeclarations.h and gsTemplateTools.h
+(a new .h file is instead the first include of its TU); on failure they get one retry
+with gismo.h force-included (see check_file). A new .h file (untracked or added relative to HEAD)
 that compiles only with that retry is a FAIL: it must be self-contained.
 
 Output: per file, one result line followed by that file's diagnostics, all on
@@ -414,9 +415,14 @@ def check_file(path: str, cc_entries: list, bd: str, allow_degraded: bool,
         # Mimic a real G+Smo TU: consumers see gsForwardDeclarations.h (std prelude,
         # gsConfig, gsDebug) plus gsTemplateTools.h before any other library header,
         # so headers are checked in the same context they are actually consumed in.
-        tmp.write('#include <gsCore/gsForwardDeclarations.h>\n'
-                  '#include <gsCore/gsTemplateTools.h>\n'
-                  '#include "%s"\nint gismo_syntax_check_dummy;\n' % tu)
+        # A new .h is held to rule HD-SELF instead: it is the first include of its TU,
+        # so it must not lean on those two headers.
+        if ext == ".h" and is_new_file(path, base):
+            tmp.write('#include "%s"\nint gismo_syntax_check_dummy;\n' % tu)
+        else:
+            tmp.write('#include <gsCore/gsForwardDeclarations.h>\n'
+                      '#include <gsCore/gsTemplateTools.h>\n'
+                      '#include "%s"\nint gismo_syntax_check_dummy;\n' % tu)
         tmp.close()
         tu = tmp.name
     marker = ""

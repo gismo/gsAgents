@@ -344,7 +344,13 @@ def scope_files(root: str, budget: Budget) -> List[Tuple[str, str, str]]:
         if not l or l.startswith("STATUS:"):
             continue
         repo, st, path = l.split("\t", 2)
-        rows.append((repo, st, git_unquote(path)))
+        # The scope prefixes a nested repository's path before git's quoting, so the
+        # quotes open after "<repo>/".
+        if repo != "." and path.startswith(repo + "/"):
+            path = repo + "/" + git_unquote(path[len(repo) + 1:])
+        else:
+            path = git_unquote(path)
+        rows.append((repo, st, path))
     return sorted(rows, key=lambda t: t[2])
 
 

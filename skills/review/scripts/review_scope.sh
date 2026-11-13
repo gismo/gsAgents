@@ -241,16 +241,33 @@ if [ "${#ENTRIES[@]}" -gt 0 ]; then
 fi
 
 if [ "$DIGEST" -eq 1 ]; then
-    # md5 of the sorted "<status> <path> <md5 of content | ->" rows; paths are
-    # root-relative, so the rows do not depend on the cwd.
+    # md5 of the sorted rows
+    #   "<status> <path> <md5 of content | -> <base blob | -> <base mode | -> <current mode | ->"
+    # Paths are root-relative, so the rows do not depend on the cwd. The base side is the blob
+    # id and mode of the file (the old path for a rename) at the repository's own comparison
+    # ref, so identical working bytes against a different base digest differently. The
+    # comparison commit id itself is not hashed: rebasing without touching a file leaves its
+    # blob id, and so the digest, unchanged.
     rows=""
+    declare -A DREF=()
     for e in ${SORTED[@]+"${SORTED[@]}"}; do
         IFS=$'\t' read -r label st p o <<<"$e"
-        h="-"
+        h="-"; bb="-"; bm="-"; cm="-"
         if [ "$st" != D ] && [ -f "$ROOT/$p" ]; then
             h="$(md5sum <"$ROOT/$p")"; h="${h%% *}"
+            if [ -L "$ROOT/$p" ]; then cm=l; elif [ -x "$ROOT/$p" ]; then cm=x; else cm=f; fi
         fi
-        rows+="$st $p $h"$'\n'
+        if [ "$st" != A ]; then
+            if [ "$label" = "." ]; then dir="$ROOT"; rel="${o:-$p}"; else dir="$ROOT/$label"; rel="${o:-$p}"; rel="${rel#"$label"/}"; fi
+            if [ -z "${DREF[$label]+x}" ]; then
+                DREF[$label]="$(resolve_ref "$label")" || fail "no merge-base between '${NESTED_BASE[$label]:-$BASE}' and HEAD$([ "$label" = "." ] || printf ' in %s' "$label")$(err_tail)"
+            fi
+            ref="${DREF[$label]}"
+            bb="$(git -C "$dir" rev-parse -q --verify "$ref:$rel" 2>/dev/null)" || bb="-"
+            bm="$(git -C "$dir" ls-tree "$ref" -- "$rel" 2>/dev/null | awk 'NR == 1 { print $1 }')"
+            [ -n "$bm" ] || bm="-"
+        fi
+        rows+="$st $p $h $bb $bm $cm"$'\n'
     done
     printf '%s' "$rows" | LC_ALL=C sort | md5sum | cut -d' ' -f1
     exit 0

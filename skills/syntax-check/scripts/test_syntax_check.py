@@ -125,6 +125,29 @@ def test_new_self_contained_h_is_ok(tree: Path) -> None:
     assert f"  OK   {h}\n" in res.stdout and res.returncode == 0
 
 
+NEEDS_PRELUDE = "#pragma once\ngsP x;\n"
+
+
+def test_new_h_relying_on_the_prelude_fails_but_an_existing_one_passes(tree: Path) -> None:
+    write(tree / "src/gsCore/gsForwardDeclarations.h", "#pragma once\ntypedef int gsP;\n")
+    old = write(tree / "src/gsCore/gsOld.h", NEEDS_PRELUDE)
+    commit_all(tree)
+    new = write(tree / "src/gsCore/gsNew.h", NEEDS_PRELUDE)
+    res = run_check(tree, new)
+    assert f"  FAIL {new}" in res.stdout and "gsP" in res.stdout
+    assert res.returncode == 1
+    res = run_check(tree, old)
+    assert f"  OK   {old}\n" in res.stdout and res.returncode == 0
+
+
+def test_new_h_is_the_first_include_of_its_translation_unit(tree: Path) -> None:
+    write(tree / "src/gsCore/gsForwardDeclarations.h", "#pragma once\ntypedef int gsP;\n")
+    commit_all(tree)
+    h = write(tree / "src/gsCore/gsNew.h", "#pragma once\ntypedef int gsP;\ngsP x;\n")
+    res = run_check(tree, h)
+    assert f"  OK   {h}\n" in res.stdout and res.returncode == 0
+
+
 def test_nested_repository_decides_newness(tmp_path: Path) -> None:
     root = make_tree(tmp_path)
     mod = root / "optional/gsMod"

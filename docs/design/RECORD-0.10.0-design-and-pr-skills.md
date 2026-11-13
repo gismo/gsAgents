@@ -108,5 +108,8 @@ behaviour; this file is where the history lives.
 - A new file in a git-ignored path and a nested repository outside `optional/` are not seen.
 - Audit counts: `virtual` on a line added inside an already-open block comment, or inside a raw
   string literal, is counted as code. Budget rows cannot hold paths with spaces.
+- `review_scope.sh` passes on the paths git still quotes with `core.quotepath=off` (a tab, double
+  quote or backslash in the name) in quoted form: such a header is left out of the default scope,
+  and under `--all-files` its row in the digest carries no content or base side.
 - `.claude/plans/` is ignored by git, so a design does not travel with the branch; `/gismo:pr`
   restates what the description needs from it.

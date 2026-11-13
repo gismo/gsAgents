@@ -172,7 +172,7 @@ after it is fixed without overwriting the first run:
   review.md        the report
   decisions.md     your answers from the resolve step, which also writes fix-plan.md,
                    handover-R<n>-*.md and comment-R<n>.md
-  input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5
+  input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5  args
                    budget.tsv (budget check)  intrusion.tsv (design audit)
   findings/        one file per reviewer (style.md, correctness.md, ...)
   debate/          topics.md and one file per position
