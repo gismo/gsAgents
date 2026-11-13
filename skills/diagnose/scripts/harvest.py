@@ -4,8 +4,9 @@
 The corpus is the set of artifacts left behind by `/gismo:implement` closed
 loops and by ordinary Claude Code sessions: task specs, implementation
 reports and adversarial review files under `.claude/plans/<slug>/tasks/`,
-session transcripts under `~/.claude/projects/**/*.jsonl`, and curated
-memory documents under `~/.claude/projects/*/memory/*.md`.
+`/gismo:review` output under `.claude/plans/<slug>/review/<timestamp>/` (the per-agent
+`findings/*.md`, the script-decided `input/lint.tsv` and the `review.md` headline), session transcripts under
+`~/.claude/projects/**/*.jsonl`, and curated memory documents under `~/.claude/projects/*/memory/*.md`.
 
 This script performs extraction only. It never decides what a finding
 *means* -- it locates findings, attaches provenance (source path, run slug
@@ -441,6 +442,277 @@ def blocked_passage(text: str) -> str:
     context = text[max(0, end - 600) : end]
     paragraphs = [p.strip() for p in context.split("\n\n") if p.strip()]
     return paragraphs[-1] if paragraphs else "RESULT: BLOCKED"
+
+
+# ---------------------------------------------------------------------------
+# /gismo:review output parser
+# ---------------------------------------------------------------------------
+
+# Finding header written by the review agents:
+#   ### F<n> | <severity> | <evidence label> | <RULE-ID or -> | <path>:<line>
+_FINDING_HEADER_RE = re.compile(
+    r"^###[ \t]+F(\d+)[ \t]*\|[ \t]*(blocker|major|minor|note)[ \t]*\|"
+    r"[ \t]*(MEASURED|REASONED|UNVERIFIED)[ \t]*\|[ \t]*([^|\n]*?)[ \t]*\|"
+    r"[ \t]*(.*?)[ \t]*$",
+    re.MULTILINE,
+)
+_FINDINGS_TOTAL_RE = re.compile(r"^FINDINGS:\s*(\d+)\b.*$", re.MULTILINE)
+_SEVERITY_ORDER: Dict[str, int] = {"blocker": 4, "major": 3, "minor": 2, "note": 1}
+_REVIEW_SUMMARY_NAME = "review.md"
+_REVIEW_DIR_GLOB = "*/review/*"
+_REVIEW_FINDINGS_GLOB = "findings/*.md"
+_REVIEW_LINT_NAME = "input/lint.tsv"
+
+# Script-decided findings: ``<path>:<line>\t<RULE-ID>\t<severity>\t<message>``. The
+# ``SKIP``, ``STAT`` and ``STATUS:`` lines of the same file do not match.
+_LINT_LINE_RE = re.compile(
+    r"^(?P<loc>[^\t]+:\d+)\t(?P<rule>[A-Z][A-Z0-9]*-[A-Z0-9]+)\t"
+    r"(?P<sev>blocker|major|minor|note)\t(?P<msg>.*)$"
+)
+
+
+@dataclass
+class ReviewFinding:
+    """One finding block from a review finding file.
+
+    :ivar number: the ``F<n>`` number within its file.
+    :ivar severity: ``blocker``, ``major``, ``minor`` or ``note``.
+    :ivar evidence: ``MEASURED``, ``REASONED`` or ``UNVERIFIED``.
+    :ivar rule_id: the RULE-ID, or ``-`` when the finding has none.
+    :ivar location: ``<path>:<line>`` as written in the header.
+    :ivar what: the text after ``What:`` (first paragraph), or ``""``.
+    """
+
+    number: int
+    severity: str
+    evidence: str
+    rule_id: str
+    location: str
+    what: str
+
+
+def parse_review_findings(text: str) -> List[ReviewFinding]:
+    """Parse the ``### F<n> | ...`` blocks of a review finding file.
+
+    Blocks inside fenced code are ignored. A block extends to the next
+    finding header or the end of the text.
+
+    :param text: the file content.
+    :returns: the findings in file order.
+    """
+    masked = mask_fences(text)
+    headers = list(_FINDING_HEADER_RE.finditer(masked))
+    findings: List[ReviewFinding] = []
+    for i, m in enumerate(headers):
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        body = text[m.end() : end]
+        what_m = re.search(r"^What:[ \t]*(.*?)(?:\n\s*\n|\nEvidence:|\nDirection:|\Z)", body, re.MULTILINE | re.DOTALL)
+        what = " ".join(what_m.group(1).split()) if what_m else ""
+        findings.append(
+            ReviewFinding(
+                number=int(m.group(1)),
+                severity=m.group(2),
+                evidence=m.group(3),
+                rule_id=m.group(4).strip() or "-",
+                location=m.group(5).strip(),
+                what=what,
+            )
+        )
+    return findings
+
+
+def parse_lint_findings(text: str) -> List[ReviewFinding]:
+    """Parse the finding lines of a review's ``input/lint.tsv``.
+
+    Each line is ``<path>:<line>``, RULE-ID, severity and message, tab-separated.
+    ``SKIP``, ``STAT`` and ``STATUS:`` lines and anything else are ignored, as are
+    ``note`` rows, which are advisory and not findings. The findings are
+    script-decided, hence ``MEASURED``.
+
+    :param text: the file content.
+    :returns: the findings in file order, numbered from 1.
+    """
+    findings: List[ReviewFinding] = []
+    for line in text.splitlines():
+        m = _LINT_LINE_RE.match(line.rstrip("\r"))
+        if not m or m.group("sev") == "note":
+            continue
+        findings.append(
+            ReviewFinding(
+                number=len(findings) + 1,
+                severity=m.group("sev"),
+                evidence="MEASURED",
+                rule_id=m.group("rule"),
+                location=m.group("loc"),
+                what=m.group("msg").strip(),
+            )
+        )
+    return findings
+
+
+def _review_dir_fingerprint(review_dir: Path) -> Optional[str]:
+    """SHA-256 over the plan slug, the timestamp directory name, ``review.md``, the per-agent
+    finding files and ``input/lint.tsv``.
+
+    Layout is ``<slug>/review/<timestamp>``; the slug and timestamp keep distinct runs with
+    identical content apart, while archived copies of one run still collide.
+    """
+    digest = hashlib.sha256()
+    digest.update(("%s\0%s\0" % (review_dir.parent.parent.name, review_dir.name)).encode())
+    empty = True
+    for md_file in (
+        sorted(review_dir.glob("*.md"))
+        + sorted(review_dir.glob(_REVIEW_FINDINGS_GLOB))
+        + sorted(review_dir.glob(_REVIEW_LINT_NAME))
+    ):
+        try:
+            digest.update(md_file.read_bytes())
+        except OSError:
+            continue
+        empty = False
+    return None if empty else digest.hexdigest()
+
+
+def iter_review_dirs(roots: Iterable[Path]) -> Iterator[Path]:
+    """Yield every ``.claude/plans/<slug>/review/<timestamp>`` directory under `roots`.
+
+    Archived worktrees hold byte-identical copies of a review, so directories
+    with the same content are yielded once (same reasoning as `iter_plan_dirs`).
+
+    :param roots: directories to scan.
+    :returns: an iterator of review directories.
+    """
+    seen_paths = set()
+    seen_fingerprints = set()
+    for root in roots:
+        root = root.expanduser()
+        if not root.is_dir():
+            continue
+        for plans_dir in root.glob("**/.claude/plans"):
+            if not plans_dir.is_dir():
+                continue
+            for review_dir in sorted(plans_dir.glob(_REVIEW_DIR_GLOB)):
+                if not review_dir.is_dir() or review_dir in seen_paths:
+                    continue
+                seen_paths.add(review_dir)
+                fingerprint = _review_dir_fingerprint(review_dir)
+                if fingerprint is None or fingerprint in seen_fingerprints:
+                    continue
+                seen_fingerprints.add(fingerprint)
+                yield review_dir
+
+
+def _harvest_reviews(roots: List[Path], since: Optional[date]) -> List[Record]:
+    """Extract one ``review-run`` record per review directory and one
+    ``review-finding`` record per finding.
+
+    Findings come from the per-agent files (``findings/*.md``) and from the
+    script-decided lines of ``input/lint.tsv`` (evidence ``MEASURED``).
+    ``review.md`` supplies the run's headline only; its blocks restate the others.
+    A finding's ``class_key`` is its RULE-ID; a finding without one is keyed
+    ``norule:<slug of its What line>``.
+
+    :param roots: directories to scan.
+    :param since: only directories whose ``review.md`` (or, failing that, the
+        last finding or lint file) is modified on/after this date are considered.
+    :returns: the extracted records.
+    """
+    records: List[Record] = []
+    for review_dir in iter_review_dirs(roots):
+        summary = review_dir / _REVIEW_SUMMARY_NAME
+        lint_file = review_dir / _REVIEW_LINT_NAME
+        agent_files = sorted(review_dir.glob(_REVIEW_FINDINGS_GLOB))
+        finding_files = agent_files + ([lint_file] if lint_file.is_file() else [])
+        if not summary.is_file() and not finding_files:
+            continue
+        dated = summary if summary.is_file() else finding_files[-1]
+        if not artifact_after(dated, since):
+            continue
+        run_slug = f"{review_dir.parent.parent.name}/{review_dir.name}"
+        branch = git_branch_for(_repo_root_for(review_dir))
+        run_id = str(review_dir)
+
+        headline = run_slug
+        if summary.is_file():
+            summary_text = summary.read_text(encoding="utf-8", errors="replace")
+            first_heading = _HEADING_RE.search(summary_text)
+            headline = first_heading.group(2) if first_heading else run_slug
+            total = _FINDINGS_TOTAL_RE.search(summary_text)
+            if total:
+                headline += f" ({total.group(0)})"
+        records.append(
+            Record(
+                kind="review-run",
+                class_key="review-run",
+                text=headline,
+                source_path=str(summary if summary.is_file() else review_dir),
+                timestamp=iso_mtime(dated),
+                run_slug=run_slug,
+                run_id=run_id,
+                git_branch=branch,
+            )
+        )
+
+        for finding_file in finding_files:
+            text = finding_file.read_text(encoding="utf-8", errors="replace")
+            parse = parse_lint_findings if finding_file == lint_file else parse_review_findings
+            for f in parse(text):
+                key = (
+                    f.rule_id
+                    if f.rule_id != "-"
+                    else "norule:" + make_class_key(f.what or f.location)
+                )
+                records.append(
+                    Record(
+                        kind="review-finding",
+                        class_key=key,
+                        text=f"{f.rule_id} | {f.severity} | {f.evidence} | {f.location}: {f.what}",
+                        source_path=str(finding_file),
+                        timestamp=iso_mtime(finding_file),
+                        run_slug=run_slug,
+                        run_id=run_id,
+                        git_branch=branch,
+                        extra={
+                            "rule_id": f.rule_id,
+                            "severity": f.severity,
+                            "evidence": f.evidence,
+                            "location": f.location,
+                            "agent_file": finding_file.name,
+                        },
+                    )
+                )
+    return records
+
+
+def rank_rule_ids(records: List[Record]) -> List[Dict[str, Any]]:
+    """Rank the RULE-IDs of ``review-finding`` records by recurrence.
+
+    Ordered by distinct review runs (ten hits in one review is one
+    incident), then by finding count, then by worst severity, then by name.
+    Findings without a RULE-ID are excluded: they cannot feed a rule.
+
+    :param records: all harvested records.
+    :returns: one dict per RULE-ID with keys ``rule_id``, ``runs``,
+        ``findings``, ``worst`` and ``measured``.
+    """
+    stats: Dict[str, Dict[str, Any]] = {}
+    for rec in records:
+        if rec.kind != "review-finding" or rec.extra.get("rule_id", "-") == "-":
+            continue
+        s = stats.setdefault(
+            rec.class_key,
+            {"rule_id": rec.class_key, "runs": set(), "findings": 0, "worst": "note", "measured": 0},
+        )
+        s["runs"].add(rec.session_unit())
+        s["findings"] += 1
+        severity = rec.extra.get("severity", "note")
+        if _SEVERITY_ORDER[severity] > _SEVERITY_ORDER[s["worst"]]:
+            s["worst"] = severity
+        if rec.extra.get("evidence") == "MEASURED":
+            s["measured"] += 1
+    ranked = [dict(s, runs=len(s["runs"])) for s in stats.values()]
+    ranked.sort(key=lambda s: (-s["runs"], -s["findings"], -_SEVERITY_ORDER[s["worst"]], s["rule_id"]))
+    return ranked
 
 
 # ---------------------------------------------------------------------------
@@ -1019,6 +1291,7 @@ def build_records(
         for `conventions.tsv`, scoped to Required-fixes regions only.
     """
     index_entries, records, conventions_totals = _harvest_run_dirs(roots, since)
+    records.extend(_harvest_reviews(roots, since))
     records.extend(_harvest_transcripts(roots, since))
     records.extend(_harvest_memory(roots, since))
     return index_entries, records, conventions_totals
@@ -1033,6 +1306,7 @@ _SLICE_KIND_MAP: Dict[str, Tuple[str, ...]] = {
     "review-fixups.md": ("review-fixup",),
     "report-blocked.md": ("report-blocked",),
     "report-deviations.md": ("report-deviation",),
+    "review-findings.md": ("review-finding",),
     "user-corrections.md": ("user-correction",),
     "memory-feedback.md": ("memory-feedback", "memory-star-finding", "memory-wikilink"),
 }
@@ -1147,6 +1421,20 @@ def write_summary(
     lines.append("## Extracted record counts")
     for kind in sorted(kind_counts):
         lines.append(f"- {kind}: {kind_counts[kind]}")
+
+    ranked = rank_rule_ids(records)
+    if ranked:
+        lines.append("")
+        lines.append(
+            f"## Review RULE-IDs by recurrence ({kind_counts.get('review-run', 0)} review runs)"
+        )
+        lines.append("")
+        lines.append("| RULE-ID | runs | findings | worst | measured |")
+        lines.append("|---|---|---|---|---|")
+        for s in ranked:
+            lines.append(
+                f"| {s['rule_id']} | {s['runs']} | {s['findings']} | {s['worst']} | {s['measured']} |"
+            )
     (out_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

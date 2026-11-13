@@ -695,3 +695,126 @@ def test_unclosed_fence_report_lands_in_no_result_bucket(tmp_path):
     assert entry["no_result_reports"] == 1
     summary = (out_dir / "summary.md").read_text()
     assert "Report files with no RESULT line" in summary and ": 1" in summary
+
+
+# ---------------------------------------------------------------------------
+# /gismo:review output
+# ---------------------------------------------------------------------------
+
+_FINDING_FILE = (
+    "### F1 | major | MEASURED | CM-NARR | src/a.h:4\n"
+    "What: Narrates the change.\nEvidence: `// previously`\nDirection: Delete.\n\n"
+    "### F2 | minor | REASONED | - | src/a.h:9\n"
+    "What: Odd loop bound.\nEvidence: x\nDirection: y\n\n"
+    "FINDINGS: 2 (blocker 0, major 1, minor 1, note 0)\n"
+)
+
+
+def test_parse_review_findings_reads_headers_and_what():
+    findings = harvest.parse_review_findings(_FINDING_FILE)
+    assert [(f.number, f.severity, f.evidence, f.rule_id) for f in findings] == [
+        (1, "major", "MEASURED", "CM-NARR"),
+        (2, "minor", "REASONED", "-"),
+    ]
+    assert findings[0].location == "src/a.h:4"
+    assert findings[0].what == "Narrates the change."
+
+
+def test_review_rule_ids_are_ranked_by_distinct_runs(tmp_path):
+    for name in ("20261101-0900", "20261102-0900"):
+        d = tmp_path / "repo" / ".claude" / "plans" / "feature" / "review" / name
+        (d / "findings").mkdir(parents=True)
+        (d / "review.md").write_text(f"# Review {name}\nFINDINGS: 2\n")
+        (d / "findings" / "style.md").write_text(_FINDING_FILE + f"\n<!-- {name} -->\n")
+    _, records, _ = harvest.build_records([tmp_path], since=None)
+    ranked = harvest.rank_rule_ids(records)
+    assert [(s["rule_id"], s["runs"], s["findings"]) for s in ranked] == [("CM-NARR", 2, 2)]
+    assert sum(r.kind == "review-run" for r in records) == 2
+    out_dir = tmp_path / "out"
+    harvest.harvest([tmp_path], out_dir, since=None)
+    assert "| CM-NARR | 2 | 2 | major | 2 |" in (out_dir / "summary.md").read_text()
+
+
+_LINT_TSV = (
+    "src/a.h:4\tCM-NARR\tmajor\tchange narration\n"
+    "src/b.h:7\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    "src/b.h:9\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    "SKIP\tsrc/c.cpp\tbinary\n"
+    "STAT\tTOTAL\tadded=3\n"
+    "STATUS: FINDINGS 3\n"
+)
+
+_REVIEW_MD_BLOCKS = (
+    "# Review run\nFINDINGS: 1\n\n"
+    "### R1 | major | mechanical\nWhat: restates a finding.\n"
+    "### F9 | major | MEASURED | ZZ-ONLY | src/z.h:1\nWhat: must not be harvested from review.md.\n"
+)
+
+
+def _review_dir(tmp_path, name, lint=None, agent=None, summary=None):
+    d = tmp_path / "repo" / ".claude" / "plans" / "feature" / "review" / name
+    (d / "findings").mkdir(parents=True)
+    (d / "input").mkdir()
+    if summary is not None:
+        (d / "review.md").write_text(summary)
+    if agent is not None:
+        (d / "findings" / "style.md").write_text(agent)
+    if lint is not None:
+        (d / "input" / "lint.tsv").write_text(lint)
+    return d
+
+
+def test_parse_lint_findings_skips_non_finding_lines():
+    findings = harvest.parse_lint_findings(_LINT_TSV)
+    assert [(f.rule_id, f.severity, f.evidence, f.location) for f in findings] == [
+        ("CM-NARR", "major", "MEASURED", "src/a.h:4"),
+        ("WS-TRAIL", "minor", "MEASURED", "src/b.h:7"),
+        ("WS-TRAIL", "minor", "MEASURED", "src/b.h:9"),
+    ]
+
+
+def test_lint_findings_reach_the_rule_table(tmp_path):
+    _review_dir(tmp_path, "20261101-0900", lint=_LINT_TSV, agent=_FINDING_FILE, summary="# Run A\n")
+    _review_dir(tmp_path, "20261102-0900", lint=_LINT_TSV + "\n", summary="# Run B\n")
+    _, records, _ = harvest.build_records([tmp_path], since=None)
+    ranked = {s["rule_id"]: (s["runs"], s["findings"]) for s in harvest.rank_rule_ids(records)}
+    assert ranked == {"WS-TRAIL": (2, 4), "CM-NARR": (2, 3)}
+    lint_records = [r for r in records if r.kind == "review-finding" and r.extra["agent_file"] == "lint.tsv"]
+    assert len(lint_records) == 6 and {r.extra["evidence"] for r in lint_records} == {"MEASURED"}
+
+
+def test_review_md_is_never_a_source_of_findings(tmp_path):
+    _review_dir(tmp_path, "20261101-0900", summary=_REVIEW_MD_BLOCKS)
+    _, records, _ = harvest.build_records([tmp_path], since=None)
+    assert not [r for r in records if r.kind == "review-finding"]
+    runs = [r for r in records if r.kind == "review-run"]
+    assert len(runs) == 1 and runs[0].text.startswith("Review run")
+
+
+def test_lint_note_rows_are_not_harvested():
+    findings = harvest.parse_lint_findings(
+        "src/a.h:1\tID-INTLOOP\tnote\tloop variable of type 'int'\n"
+        "src/a.h:2\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    )
+    assert [(f.rule_id, f.severity) for f in findings] == [("WS-TRAIL", "minor")]
+
+
+def test_review_dedup_keeps_distinct_timestamps_and_collapses_archives(tmp_path):
+    lint = "src/a.h:2\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    _review_dir(tmp_path, "20261101-0900", lint=lint)
+    _review_dir(tmp_path, "20261102-0900", lint=lint)
+    archived = tmp_path / "archive" / ".claude" / "plans" / "feature" / "review" / "20261101-0900"
+    (archived / "input").mkdir(parents=True)
+    (archived / "input" / "lint.tsv").write_text(lint)
+    dirs = [d.name for d in harvest.iter_review_dirs([tmp_path])]
+    assert sorted(dirs) == ["20261101-0900", "20261102-0900"]
+
+
+def test_review_dedup_keeps_distinct_slugs_with_the_same_timestamp(tmp_path):
+    lint = "src/a.h:2\tWS-TRAIL\tminor\ttrailing whitespace\n"
+    for slug in ("feature", "other"):
+        d = tmp_path / "repo" / ".claude" / "plans" / slug / "review" / "20261101-0900"
+        (d / "input").mkdir(parents=True)
+        (d / "input" / "lint.tsv").write_text(lint)
+    dirs = [d.parent.parent.name for d in harvest.iter_review_dirs([tmp_path])]
+    assert sorted(dirs) == ["feature", "other"]

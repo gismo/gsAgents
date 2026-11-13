@@ -13,14 +13,25 @@ Flag resolution per file (once compile_commands.json is confirmed to exist):
   1. Exact entry in compile_commands.json.
   2. Nearest-neighbour: any compile_commands entry whose source lives in the same
      directory (covers brand-new files not yet configured/instantiated).
-  3. --allow-degraded only: CXX_DEFINES/CXX_INCLUDES/CXX_FLAGS from the core
+  3. Borrowed (header-only directories): a file under optional/<module>/ uses an
+     entry of the same module; any other file uses the nearest configured
+     directory below the repository root (never optional/), else any entry under
+     src/. The result line says "(flags from <dir>/)".
+  4. --allow-degraded only: CXX_DEFINES/CXX_INCLUDES/CXX_FLAGS from the core
      library's CMakeFiles/gismo.dir/flags.make (library-wide flags -- may miss
      submodule-specific defines/includes; emergency use only).
+A file with no flags from any of these is reported "SKIP" and the run continues.
 
 Headers (.h/.hpp) cannot be compiled directly, so they are checked through a
-temporary TU that just #includes them.
+temporary TU that just #includes them; on failure they get one retry with gismo.h
+force-included (see check_file).
 
-Exit: 0 all files pass, 1 any failure, 2 setup error. Last stdout line: STATUS: OK|FAIL.
+Output: per file, one result line followed by that file's diagnostics, all on
+stdout in input order.
+
+Exit: 0 all files pass (STATUS: OK); 1 any failure (STATUS: FAIL); 2 no failure but
+at least one skipped file (STATUS: INCOMPLETE), or a setup error with no per-file
+lines (STATUS: FAIL).
 """
 import json
 import os
@@ -28,6 +39,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from typing import Optional
 
 HEADER_EXT = {".h", ".hpp", ".hh"}
 
@@ -118,37 +130,124 @@ def flags_from_flags_make(bd):
     sys.exit(2)
 
 
-def resolve_flags(path, cc_entries, bd, allow_degraded):
+def entry_source(entry: dict) -> str:
+    """Absolute path of the source file an entry compiles."""
+    return os.path.abspath(os.path.join(entry.get("directory", ""), entry["file"]))
+
+
+def entry_flags(entry: dict, bd: str) -> tuple:
+    """``(compiler, flags, workdir)`` of one compile_commands.json entry."""
+    return strip_io_args(entry_args(entry)) + (entry.get("directory", bd),)
+
+
+def borrowed_entry(ap: str, cc_entries: list, root: str) -> tuple:
+    """Entry whose flags best approximate those of a file without a sibling entry.
+
+    A file under ``<root>/optional/<module>/`` borrows only from entries of that same
+    module, because a module's defines and include paths cannot be guessed from
+    another one; with none, nothing is returned. Any other file in the repository
+    walks up from its directory towards ``<root>`` and returns the first entry found
+    below each ancestor (so ``src/gsExpressions/x.h`` borrows from the nearest
+    configured directory under ``src/``); the walk never enters ``optional/``.
+    Failing that, and for files outside ``root``, any entry of the library itself
+    (``<root>/src``).
+
+    :returns: ``(entry, directory the flags were borrowed from)`` or ``(None, None)``.
+    """
+    root = os.path.abspath(root)
+    opt = os.path.join(root, "optional")
+    if ap.startswith(opt + os.sep):
+        module = os.path.join(opt, ap[len(opt) + 1:].split(os.sep)[0])
+        for e in cc_entries:
+            if entry_source(e).startswith(module + os.sep):
+                return e, module
+        return None, None
+    anc = os.path.dirname(ap)
+    while anc != root and anc.startswith(root + os.sep):
+        for e in cc_entries:
+            if entry_source(e).startswith(anc + os.sep):
+                return e, anc
+        anc = os.path.dirname(anc)
+    lib = os.path.join(root, "src")
+    for e in cc_entries:
+        if entry_source(e).startswith(lib + os.sep):
+            return e, lib
+    return None, None
+
+
+def resolve_flags(
+    path: str, cc_entries: list, bd: str, allow_degraded: bool
+) -> Optional[tuple]:
+    """Resolve ``(compiler, flags, workdir, note)``, or None if no flags are usable.
+
+    ``note`` is non-empty when the flags were borrowed from another directory.
+    """
     ap = os.path.abspath(path)
     for e in cc_entries:
-        if os.path.abspath(os.path.join(e.get("directory", ""), e["file"])) == ap:
-            return strip_io_args(entry_args(e)) + (e.get("directory", bd),)
+        if entry_source(e) == ap:
+            return entry_flags(e, bd) + ("",)
     d = os.path.dirname(ap)
     for e in cc_entries:
-        if os.path.dirname(os.path.abspath(os.path.join(e.get("directory", ""), e["file"]))) == d:
-            return strip_io_args(entry_args(e)) + (e.get("directory", bd),)
+        if os.path.dirname(entry_source(e)) == d:
+            return entry_flags(e, bd) + ("",)
+    root = os.environ.get("GISMO_ROOT", os.path.dirname(bd))
+    e, src_dir = borrowed_entry(ap, cc_entries, root)
+    if e is not None:
+        note = "flags from %s/" % os.path.relpath(src_dir, root)
+        return entry_flags(e, bd) + (note,)
     if not allow_degraded:
-        sys.stderr.write(
-            "syntax_check: %s has no compile_commands.json entry and no sibling in "
-            "its directory either. If this is a brand-new file, reconfigure first: "
-            "cd %s && cmake .\n" % (path, bd))
-        print("STATUS: FAIL")
-        sys.exit(2)
+        return None
     compiler, flags = flags_from_flags_make(bd)
     # Unit-test TUs additionally need UnitTest++ and the core unittests/ dir
     # (gismo_unittest.h); this holds for optional/*/unittests too.
     if "unittests" in ap.split(os.sep):
-        root = os.environ.get("GISMO_ROOT", os.path.dirname(bd))
         flags = flags + ["-I" + os.path.join(root, "optional", "gsUnitTest"),
                          "-I" + os.path.join(root, "unittests")]
-    return compiler, flags, bd
+    return compiler, flags, bd, ""
 
 
-def check_file(path, cc_entries, bd, allow_degraded):
+def compile_tu(compiler: str, flags: list, workdir: str, tu: str,
+               preinclude: str = "") -> subprocess.CompletedProcess:
+    """Run ``-fsyntax-only`` on ``tu``, force-including ``preinclude`` if given."""
+    cmd = [compiler] + flags
+    if preinclude:
+        cmd += ["-include", preinclude]
+    cmd += ["-fsyntax-only", tu]
+    return subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
+
+
+def forced_include_missing(stderr: str) -> bool:
+    """True if the compiler could not open the force-included ``gismo.h``."""
+    return ("gismo.h: No such file" in stderr
+            or "'gismo.h' file not found" in stderr)
+
+
+def check_file(path: str, cc_entries: list, bd: str, allow_degraded: bool) -> str:
+    """Check one file; print its result line followed by its diagnostics (stdout).
+
+    A header is first compiled standalone. Many G+Smo headers rely on the umbrella
+    header having been included by the consuming TU, so on failure it is retried
+    once with ``gismo.h`` force-included ahead of it. Passing only on the retry is
+    reported as OK with a ``(needs gismo.h)`` marker: the header is not
+    self-contained but builds in every real TU. Failing the retry is a genuine FAIL
+    and the retry's diagnostics are shown, unless the retry failed only because
+    ``gismo.h`` is not on the borrowed include path; then the standalone
+    diagnostics, which describe the header itself, are shown.
+
+    :returns: ``"ok"``, ``"fail"``, or ``"skip"`` (no usable compile flags).
+    """
     if not os.path.isfile(path):
-        sys.stderr.write("syntax_check: no such file: %s\n" % path)
-        return False
-    compiler, flags, workdir = resolve_flags(path, cc_entries, bd, allow_degraded)
+        print("  FAIL %s" % path)
+        print("syntax_check: no such file: %s" % path, flush=True)
+        return "fail"
+    resolved = resolve_flags(path, cc_entries, bd, allow_degraded)
+    if resolved is None:
+        print("  SKIP %s  (no compile flags)" % path)
+        print("syntax_check: no compile_commands.json entry for this file, none in "
+              "its directory, and none that can be borrowed. If it is a brand-new "
+              "file, reconfigure first: cd %s && cmake .\n" % bd, flush=True)
+        return "skip"
+    compiler, flags, workdir, note = resolved
     ext = os.path.splitext(path)[1]
     tu = os.path.abspath(path)
     tmp = None
@@ -162,18 +261,26 @@ def check_file(path, cc_entries, bd, allow_degraded):
                   '#include "%s"\nint gismo_syntax_check_dummy;\n' % tu)
         tmp.close()
         tu = tmp.name
-    cmd = [compiler] + flags + ["-fsyntax-only", tu]
+    marker = ""
     try:
-        res = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
+        res = compile_tu(compiler, flags, workdir, tu)
+        if res.returncode != 0 and tmp:
+            retry = compile_tu(compiler, flags, workdir, tu, preinclude="gismo.h")
+            if retry.returncode == 0:
+                marker = "  (needs gismo.h)"
+            if retry.returncode == 0 or not forced_include_missing(retry.stderr):
+                res = retry
     finally:
         if tmp:
             os.unlink(tmp.name)
-    if res.returncode == 0:
-        print("  OK   %s" % path)
-        return True
-    print("  FAIL %s" % path)
-    sys.stderr.write(res.stderr[-4000:] + "\n")
-    return False
+    if note:
+        marker += "  (%s)" % note
+    ok = res.returncode == 0
+    print("  %s %s%s" % ("OK  " if ok else "FAIL", path, marker))
+    if not ok:
+        print(res.stderr[-4000:])
+    sys.stdout.flush()
+    return "ok" if ok else "fail"
 
 
 def main():
@@ -187,9 +294,15 @@ def main():
     bd = build_dir()
     assert_compile_commands(bd, allow_degraded)
     cc = load_compile_commands(bd)
-    ok = all([check_file(f, cc, bd, allow_degraded) for f in files])
-    print("STATUS: %s" % ("OK" if ok else "FAIL"))
-    sys.exit(0 if ok else 1)
+    results = [check_file(f, cc, bd, allow_degraded) for f in files]
+    if "fail" in results:
+        print("STATUS: FAIL")
+        sys.exit(1)
+    if "skip" in results:
+        print("STATUS: INCOMPLETE")
+        sys.exit(2)
+    print("STATUS: OK")
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ Start with exactly one verdict line:
 - **`ADVICE: SPEC DECIDES`** — the task spec already settles this and the caller missed it. Quote the line and where it is. The implementer follows the spec; no latitude was needed.
 - **`ADVICE: BLOCKED`** — the spec genuinely does not decide a question it needed to, or is wrong. State the defect precisely enough that the orchestrator can repair the spec, and tell the caller to report `RESULT: BLOCKED` with your reasoning. **Do not invent a decision the spec should have made** — routing the defect back is the correct outcome, not a failure.
 
-Then at most a short paragraph of reasoning. Be decisive: a recommendation, not a survey of options. If you are genuinely uncertain, say which evidence would settle it.
+Then at most a short paragraph of reasoning. Label each factual claim in it: `MEASURED` (you ran a read-only command and can show its output), `REASONED` (derived from reading the spec or code) or `UNVERIFIED` (not checked here). The implementer acts on the label, so an unchecked claim stated flatly is worse than one marked `UNVERIFIED`. Be decisive: a recommendation, not a survey of options. If you are genuinely uncertain, say which evidence would settle it.
 
 ## Rules
 

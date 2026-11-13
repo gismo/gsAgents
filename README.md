@@ -21,9 +21,10 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:test-writer` | sonnet | UnitTest++ suites |
 | `gismo:example-writer` | sonnet | Runnable drivers in `examples/` |
 | `gismo:task-reviewer` | opus | Adversarial per-task gate: PASS / PASS (fix-ups) / FAIL (attacks the change; no routine test re-runs) |
-| `gismo:task-lead` | sonnet | Per-task loop-driver: implement → review → repair cycles |
+| `gismo:task-lead` | sonnet | Per-task loop-driver: implement → lint gate → review → repair cycles |
 | `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
+| `gismo:style-checker` | sonnet | Checks a diff against the written conventions (naming, file structure, idioms, doxygen, example/test consistency) for `/gismo:review` |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
 | `gismo:debugger` | sonnet | GDB / Valgrind |
@@ -95,7 +96,7 @@ the original, so what was believed, and when it stopped being believed, survives
 instruction lines (`Review:`, `Files`, acceptance criteria) are still corrected
 in place. The reviewer appends a `## Round N` section per repair round rather
 than overwriting, and `dispatches.log` records every implementer pass (`impl`,
-`repair`, `fixup`, `evidence`), every review and every review verdict with a UTC
+`repair`, `fixup`, `lint`, `evidence`), every review and every review verdict with a UTC
 timestamp; spec-writers, scouts and advisor consults are not logged.
 
 ### Adjacent sessions and native task tracking
@@ -131,9 +132,103 @@ Agents narrate their diffs in comments: "removed the old loop because…", "adde
 task 3". That is useful scaffolding while implementing and noise once it lands. The
 framework handles it twice over. **Prevention**: the implementer protocol puts change
 reasoning in `NN-report.md`, where it already belongs, and the reviewer flags
-scaffolding left in the source. **Safety net**: `/gismo:tidy` runs over the run's diff
+scaffolding left in the source, and every implementer runs `review_lint.sh` on its
+files before building, so the mechanical forms (`CM-NARR`, `CM-LINEREF`, `CM-DEAD`,
+`CM-EMPH`) are caught for free. **Safety net**: `/gismo:tidy` runs over the run's diff
 before the final conformance check (or standalone on any dirty tree), stripping diff
 narration while keeping doxygen, theory links, complexity notes and real TODOs.
+
+### Conventions, the lint gate, and `/gismo:review`
+
+What G+Smo code looks like is written once, in `skills/review/CONVENTIONS.md`: every
+rule has an ID (`WS-TRAIL`, `CM-NARR`, `ID-INTLOOP`, `EX-PLOT`, `UT-NDEBUG`, ...), a
+severity and a checker. The writers (implementer, example-writer, test-writer,
+doc-writer) follow it; the reviewers check against it; a rule that is not written there
+is not a finding. Only lines a change added or modified are ever reported.
+The rules that hold in every `/gismo:implement` run (no shell file duplication, no git
+writes, builds only through the scripts, a denied command is reported and not replaced,
+assertions read from `GISMO_NDEBUG`) are in `skills/implement/STANDING_RULES.md`, so a
+plan's `rules.md` carries only facts about that plan.
+
+**The lint gate.** `review_lint.sh` decides every rule a script can decide, with no model
+involved. It runs three times in a task: the implementer runs it before building, the
+task-lead runs it before the first reviewer dispatch and bounces the task back once
+if it finds anything (a *lint pass*, which does not cost a repair round), and the reviewer
+receives whatever is left. Text-only defects were the main driver of repair rounds, and a
+script finds them in seconds.
+
+**`/gismo:review <level> [<base-ref> | pr <N> | <path>...]`** reviews a change and writes one
+ranked report. The review itself never edits source (its one touch on the tree is the
+ultra-level mutation proof, run only after you confirm, which restores every file
+byte-for-byte). Every finding carries a rule ID where one applies, an evidence label —
+`MEASURED` (a command ran), `REASONED` (derived from reading) or `UNVERIFIED` — and an
+action class (`mechanical`, `local`, `confirm`, `decision` or `info`) that says how it can
+be dealt with.
+Everything a run produces sits in one dated directory, so a change can be reviewed again
+after it is fixed without overwriting the first run:
+
+```
+.claude/plans/<slug>/review/<YYYYMMDD-HHMM>/
+  review.md        the report
+  decisions.md     your answers from the resolve step, which also writes fix-plan.md,
+                   handover-R<n>-*.md and comment-R<n>.md
+  input/           scope.tsv  lines.tsv  lint.tsv  syntax.txt  diff.md5
+  findings/        one file per reviewer (style.md, correctness.md, ...)
+  debate/          topics.md and one file per position
+  logs/            verbatim output of every command a finding quotes
+```
+
+The level sets what runs and what it costs:
+
+| Level | What runs | Models | Cost |
+|---|---|---|---|
+| `light` | `review_lint.sh`, syntax-check, `gismo:style-checker`; no build | sonnet only | Cheap: seconds of scripts plus one sonnet pass |
+| `medium` | light + one correctness review of the diff; no build | + one opus | One opus pass over the diff |
+| `large` | medium + numerics/performance review, tests/docs review, build of the affected targets, filtered unit tests, changed examples run with their defaults; debate panel with `--debate` | + two opus, two sonnet (builder, test runner) | Several opus passes plus build and test time |
+| `ultra` | large + the full unit-test suite, valgrind via `gismo:debugger` on changed examples, `gismo:indexer` for callers outside the diff, an opus refutation pass over every finding, the debate panel on contested findings, and mutation proof of the new tests after you confirm | + more opus, scaling with the number of findings | The most expensive: use it before a merge, not on every commit |
+
+`--build` at light or medium adds the build, the filtered tests and the example runs, and
+no extra reviewer; `--no-build` at large or ultra drops every step that needs a binary (a
+no-build run reports whatever it would have executed as `REASONED`, and says so under
+*Not checked*). A review that runs
+no correctness agent lists that under *Not checked* rather than implying a clean bill.
+Findings from past reviews feed `/gismo:diagnose`, which ranks recurring rule IDs so a
+rule that keeps being broken gets reworded.
+
+**Processing a report: `/gismo:review resolve [<review-dir>]`.** A report mixes trivia with
+real decisions, so each finding is triaged when the report is written. `mechanical` findings
+were decided by a script and change no executable token (whitespace, doxygen tag form, a
+narration comment). `local` findings are measured defects with one evident remedy inside
+the change (a missing doxygen block, `int` for an index, an uncommented test). `confirm`
+findings are reasoned rather than measured but have one evident remedy inside the change (a
+doxygen sentence that omits a new precondition). Everything else that asks for a change —
+anything unverified, any debate topic, anything touching a public interface or admitting
+more than one fix — is a `decision`. A note that asks for nothing is `info`. The resolve
+step works from the report file, right after the review or in a later session: it names the
+`info` findings, shows the `confirm` findings as one list and asks once, then asks you the
+decisions, a few at a time and in plain words. You answer `fix`, `accept`, `defer` or
+`elsewhere` (recorded in `decisions.md`); `elsewhere` is for a finding that is real but
+belongs in another branch or with the maintainers, and produces a handover file or the
+text of a comment for you to post. It then turns the `local` findings, the confirmed ones
+and your `fix` answers into a plan for `/gismo:implement`, applies the mechanical batch
+through `gismo:doc-writer`, and finally re-runs the lint. Each of those
+steps waits for your yes, and the reviewers never fix their own findings.
+
+**Commented examples and tests.** Examples and unit tests are reviewed by reading, so the
+rulebook holds them to a higher commenting standard than library code (`EX-COMMENT`,
+`UT-COMMENT`): each `TEST` states the property it verifies and where its expected values
+come from, each block says what it sets up, does or checks, and each tolerance states its
+origin. The writers are told so, `gismo:style-checker` checks that the comments are there
+and say something, `gismo:task-reviewer` checks that what they claim is true, and
+`/gismo:tidy` keeps them.
+
+**One-off tree cleanup.** The existing tree predates the whitespace and doxygen-tag
+rules, and the review never reports old lines. `/gismo:review cleanup whitespace` and
+`/gismo:review cleanup doxygen-tags` (backed by `tree_cleanup.sh`) bring it in line in
+two mechanical passes: a dry run by default, `--apply` only on a clean working tree, and a
+proof afterwards (`git diff -w` shows only whitespace; reversing the `\` to `@`
+substitution reproduces the old blobs exactly). It never commits; add each cleanup commit
+to `.git-blame-ignore-revs`. A clang-format pass comes later, with a fitted config.
 
 Cost control rests on an asymmetry: **writing is cheap, checking is expensive.**
 A well-grounded spec (opus `gismo:spec-writer`) lets the three implementers run
@@ -150,7 +245,7 @@ task-leads; a task-lead spawns its task's agent and the reviewer, and may
 message those two — and only those two — while they run; spec-writer,
 the implementers, the reviewer, doc-writer and debugger may spawn scout and
 indexer; the three implementers may additionally spawn `gismo:advisor` (opus,
-capped at 2 per task); scout, indexer and advisor spawn nothing.
+capped at 2 per task); scout, indexer, advisor and style-checker spawn nothing.
 
 Each agent also pins an `effort:` tier in its frontmatter, the reasoning-effort
 counterpart of `model:`: `high` for `gismo:task-reviewer`; `low` for the
@@ -317,6 +412,7 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 | `/gismo:plan` | Triage (quick/standard) + planning conventions → `plan.md` (+ decomposition) |
 | `/gismo:implement` | Closed-loop orchestration of an approved plan, in either mode |
 | `/gismo:evidence-log` | Run a command through a verbatim numbered logger; reports cite log path and line range |
+| `/gismo:review` | Review of a change at four depths (`light`, `medium`, `large`, `ultra`) into one triaged report; `resolve` to process a report with you; `cleanup` for the one-off tree cleanup |
 | `/gismo:tidy` | Strip change-narration comments from the diff before committing |
 | `/gismo:dev-config` | Set build dir + parallel-jobs cap |
 | `/gismo:build-target` | Guarded `make <target>` — the only sanctioned build |
@@ -367,6 +463,11 @@ gsAgents/
 │   └── marketplace.json    # this repo doubles as its own marketplace
 ├── agents/*.md             # agent definitions (Claude format)
 ├── skills/<name>/          # SKILL.md + scripts/, per the Agent Skills standard
+│   ├── implement/          #   TASK_CONTRACT.md (protocol), STANDING_RULES.md (every-run rules)
+│   └── review/             #   CONVENTIONS.md (the rulebook), scripts/ (scope, lint, tree cleanup)
+├── hooks/hooks.json        # PreToolUse guard against model overrides
+├── scripts/                # guard-agent-model.py, audit-agent-models.py
+├── docs/design/            # dated design records
 ├── cmake/InstallPlugin.cmake
 └── CMakeLists.txt          # optional install flag
 ```

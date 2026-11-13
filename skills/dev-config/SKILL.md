@@ -34,3 +34,7 @@ The config file is `.claude/gismo-dev.local.json` at the repo root (gitignored):
    ```
 
 5. `set_config.sh` asserts `compile_commands.json` exists in the chosen build dir and, if missing, enables it automatically (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .` — a cache-var flip, no rebuild triggered) before writing the config. This is required: `/gismo:syntax-check` refuses to run without it (exact per-file flags matter — a submodule file must never be checked with the core library's generic flags). Confirm to the user what was set, including the build type of the selected dir.
+
+## What the scripts export
+
+`gismo_env.sh` also exports `GISMO_BUILD_TYPE` (the build dir's `CMAKE_BUILD_TYPE`, or `unknown`) and `GISMO_NDEBUG`: `1` when `-DNDEBUG` is in effect so `GISMO_ASSERT` and `assert` are compiled out, `0` when assertions are live, `unknown` when neither `CMakeCache.txt` nor `compile_commands.json` decides it. The compiler flags decide, not the type name: in G+Smo `RelWithDebInfo` carries no `-DNDEBUG`, so its assertions are live. Agents read it instead of assuming whether an assertion test can fire.

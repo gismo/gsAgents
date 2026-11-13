@@ -120,6 +120,8 @@ Return a structured report using this template:
 <concrete steps, referencing G+Smo conventions>
 ```
 
+Label each claim in Crash site, Cause and Suggested fix: `MEASURED` (a GDB or Valgrind run produced it and its output is in Evidence), `REASONED` (derived from reading the trace or source) or `UNVERIFIED` (not checked in this session). A cause inferred from a stack frame but not reproduced under Valgrind is `REASONED`; say so rather than presenting it as established.
+
 ---
 
 ## G+Smo-Specific Debugging Rules

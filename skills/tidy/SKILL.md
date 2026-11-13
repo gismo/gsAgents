@@ -12,8 +12,11 @@ written *to the next developer reading the file* stay.
 
 ## Scope
 
-Default target is the working diff: `git diff` plus untracked files from
-`git status --short`. An argument narrows it to a path, or compares against a git ref.
+Default target is the working diff, including untracked files and the nested git repositories
+under `optional/` (a plain `git diff` at the root shows nothing for them):
+`bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_scope.sh` lists the files and
+`review_scope.sh --lines` the added or changed line ranges of each. An argument narrows it to a
+path, or compares against a git ref (`--base <ref>`).
 **Only ever touch lines that this diff added or modified** — pre-existing comments in a
 file you happen to be editing are somebody else's decision, not yours.
 
@@ -47,6 +50,11 @@ note it.
   obvious one is wrong (numerical stability, a cancellation, an aliasing hazard).
 - Units, index conventions, tensor shapes, expected file formats, the meaning of a
   magic constant.
+- In examples and unit tests, the comment on each block saying what it sets up, does or
+  checks, and where an expected value or tolerance comes from. These files are meant to
+  be reviewable block by block, so a comment that would be a restatement in library code
+  is load-bearing here — unless it truly says nothing beyond the line under it
+  (`// check result`).
 - Live `TODO`/`FIXME` that names real remaining work, and warnings about a real trap
   ("callers must have called `compute()` first").
 - Anything that would make a reader who never saw this diff stop and ask "why?".
@@ -62,10 +70,16 @@ comments here — this pass only removes.
 
 ## Procedure
 
-1. Collect the target files from the diff. If there are more than ~10, dispatch one
+1. Collect the target files with `review_scope.sh` and take the deterministic starting list from
+   `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/scripts/review_lint.sh`: its `CM-NARR`, `CM-LINEREF`,
+   `CM-DEAD` and `CM-EMPH` findings are the comments a pattern match found on added or changed
+   lines. They are candidates, not verdicts: apply the Delete/Keep test to each (a `previously`
+   inside a real doxygen contract stays), and apply it to what a regex cannot see — narration in
+   words the patterns do not list, restatements of the code, justifications of an absence. If there
+   are more than ~10 files, dispatch one
    `gismo:doc-writer` (sonnet — the cheapest tier, and comment-only edits are exactly its
-   mandate) per group of files, quoting this skill's Delete/Keep rules and the file list
-   in the prompt. Otherwise do it yourself; a bounded comment-only pass is not worth a
+   mandate) per group of files, quoting this skill's Delete/Keep rules, the file list and that
+   group's lint findings in the prompt. Otherwise do it yourself; a bounded comment-only pass is not worth a
    dispatch.
 2. Edit. Removing a comment must not change a single token of executable code.
 3. **Syntax-check every file you touched** —
