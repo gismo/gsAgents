@@ -124,3 +124,11 @@ The implementers execute without discovery — **the intelligence must be in the
 - Acceptance criteria must be *checkable by a machine or a diff reader*: "suite gsNewFeature_test passes", "example runs with default args and prints an EoC table ≈ 3", never "code is clean".
 - Dependencies: order tasks so each builds on completed ones; mark truly independent tasks `Parallelizable-with:` so the orchestrator can run them concurrently.
 - Tests are their own tasks (gismo:test-writer), and a feature task's criteria should not depend on tests that don't exist yet — sequence: implement → test → (optionally) example → docs.
+
+## 3. Check the names before handing on
+
+Implementers copy the plan's names verbatim, so a name that breaks the naming rules in `${CLAUDE_PLUGIN_ROOT}/skills/review/CONVENTIONS.md` returns from `/gismo:review` as a rename across every caller in source, tests and examples. Correct it here, where it costs one line.
+
+Run the check in standard mode, and in quick mode when the plan introduces a class, function or data member. Skip it, and say so, when a design was checked and the plan introduces no name beyond its `## Interface`. Dispatch `gismo:style-checker` with `names:`, the file `plan.md` (all sections), and the output file `.claude/plans/<slug>/names/plan.md`.
+
+The check runs before the plan goes to `/gismo:implement`, so a correction is an edit of the draft, not a dated update. Correct every finding, taking the proposed name unless the user or the design chose the existing one; those, and any finding you think wrong, go to the user with the rule ID. Settle a note that a helper's failure behaviour is unstated by stating it in the plan. Dispatch once; the corrections are not checked again.

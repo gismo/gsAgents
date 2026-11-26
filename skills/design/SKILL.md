@@ -140,6 +140,8 @@ Compute the md5 with `md5sum` and write it into the `Budget:` line. The header l
 
 The sections from `## What the feature must do` to `## Choice` are a record and are not rewritten afterwards; a correction is a dated paragraph beneath the original. `## Interface` and `## Core changes` are instructions to the planner and are corrected in place, with the user's agreement when the correction changes what core gains.
 
+**Check the names.** The planner and the implementers copy the names in `## Interface` verbatim, so a name that breaks the naming rules here comes back from `/gismo:review` as a rename across every caller. Dispatch `gismo:style-checker` with `names:`, the file `design.md`, sections `## Interface` and `## Core changes`, and the output file `.claude/plans/<slug>/names/design.md`. Correct each finding in those two sections, which are instructions and corrected in place. A name the user chose, or a finding you think wrong, goes to the user with its rule ID instead; none is dropped silently. Settle a note that a helper's failure behaviour is unstated by stating it in the declaration's comment. Dispatch once; the corrections are not checked again.
+
 Then tell the user, in a few lines: the rung chosen, the core files allowed, the paths of the two files, and that `/gismo:plan` is the next step. The planner takes `## Interface` as its approach and must keep its file inventory inside the budget.
 
 ## Audit

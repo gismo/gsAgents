@@ -2,8 +2,8 @@
 
 The single statement of what G+Smo code looks like. Writers (`gismo:implementer`,
 `gismo:example-writer`, `gismo:test-writer`, `gismo:doc-writer`) follow it; reviewers
-(`gismo:style-checker`, `gismo:task-reviewer`) check against it. A rule that is not written
-here is not a finding.
+(`gismo:style-checker`, `gismo:task-reviewer`) check against it. `/gismo:design` and
+`/gismo:plan` have the names they introduce checked against section 3 before any code is written. A rule that is not written here is not a finding.
 
 ## How to read a rule
 
