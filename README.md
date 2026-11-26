@@ -24,7 +24,7 @@ parallelism has exhausted RAM and crashed machines).
 | `gismo:task-lead` | sonnet | Per-task loop-driver: implement → lint gate → review → repair cycles |
 | `gismo:spec-writer` | opus | Expands one decomposition line into a grounded task spec |
 | `gismo:doc-writer` | sonnet | Doxygen / tutorials / README |
-| `gismo:style-checker` | sonnet | Checks a diff against the written conventions (naming, file structure, idioms, doxygen, example/test consistency) for `/gismo:review` |
+| `gismo:style-checker` | sonnet | Checks a diff against the written conventions (naming, file structure, idioms, doxygen, example/test consistency) for `/gismo:review`; names mode checks a design's or plan's new names for `/gismo:design` and `/gismo:plan` |
 | `gismo:builder` | sonnet | Guarded `make` wrapper |
 | `gismo:unittest-runner` | sonnet | Build + run + analyse tests |
 | `gismo:debugger` | sonnet | GDB / Valgrind |
@@ -145,6 +145,9 @@ rule has an ID (`WS-TRAIL`, `CM-NARR`, `ID-INTLOOP`, `EX-PLOT`, `UT-NDEBUG`, ...
 severity and a checker. The writers (implementer, example-writer, test-writer,
 doc-writer) follow it; the reviewers check against it; a rule that is not written there
 is not a finding. Only lines a change added or modified are ever reported.
+Names are checked earlier as well: `/gismo:design` and `/gismo:plan` dispatch the style
+checker in names mode over the names they introduce, since implementers copy a plan's
+names verbatim and a rename after review has to follow every caller.
 The rules that hold in every `/gismo:implement` run (no shell file duplication, no git
 writes, builds only through the scripts, a denied command is reported and not replaced,
 assertions read from `GISMO_NDEBUG`) are in `skills/implement/STANDING_RULES.md`, so a
