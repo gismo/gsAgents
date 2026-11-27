@@ -7,10 +7,14 @@ file's frontmatter, so a dispatcher can silently promote the haiku scout to opus
 and nothing in the agent definition would show it. This denies such calls at the
 point of dispatch, with a reason the caller sees.
 
-Generic types (`Explore`, `Plan`, `general-purpose`, `fork`, or no
-`subagent_type` at all) declare no model of their own — they inherit the
-caller's, so omitting `model` silently runs them on whatever tier the caller
-is. This also denies that, per the dispatch rule in TASK_CONTRACT.md.
+Generic types (`Explore`, `Plan`, `general-purpose`, `fork`, Codex's built-in
+`default`, `explorer` and `worker` roles, or no agent type at all) declare no
+model of their own — they inherit the caller's, so omitting `model` silently
+runs them on whatever tier the caller is. This also denies that, per the
+dispatch rule in TASK_CONTRACT.md.
+
+Claude Code names the agent type `subagent_type`; Codex's `spawn_agent` names
+it `agent_type`. Both are read.
 
 The plugin wires this itself in `hooks/hooks.json`, so it is active on install
 with no configuration. Calls to agents outside this plugin, and calls whose
@@ -24,7 +28,7 @@ import sys
 from pathlib import Path
 
 TIER = re.compile(r"haiku|sonnet|opus|fable")
-GENERIC_TYPES = {"", "explore", "plan", "general-purpose", "fork"}
+GENERIC_TYPES = {"", "explore", "plan", "general-purpose", "fork", "default", "explorer", "worker"}
 
 
 def declared_tiers(agents_dir):
@@ -70,7 +74,7 @@ def main():
 
     tool_input = payload.get("tool_input") or {}
     override = tool_input.get("model")
-    subagent = tool_input.get("subagent_type") or ""
+    subagent = tool_input.get("subagent_type") or tool_input.get("agent_type") or ""
 
     if not override and subagent.lower() in GENERIC_TYPES:
         deny(

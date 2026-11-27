@@ -479,6 +479,7 @@ claim in tool-result evidence. Keep these properties when editing prompts.
 | `/gismo:module-map` | Per-submodule context for `optional/` modules |
 | `/gismo:audit-models` | Check each subagent ran on the tier its definition declares |
 | `/gismo:diagnose` | Mine past runs, transcripts and memory for recurring agent defects |
+| `$gismo:codex-setup` | Codex only: install the agents as Codex roles, map the tiers to Codex models, raise `agents.max_depth` |
 
 ## Installation
 
@@ -495,6 +496,38 @@ Or, from a local checkout of this repo:
 claude plugin marketplace add /path/to/gsAgents
 claude plugin install gismo@gsagents
 ```
+
+### Via the OpenAI Codex CLI (experimental)
+
+Codex reads this repository's Claude manifest and marketplace directly:
+
+```bash
+codex plugin marketplace add gismo/gsAgents     # or /path/to/gsAgents
+codex plugin add gismo@gsagents
+```
+
+That installs the skills, their scripts and the `PreToolUse` guard, but not the
+agents: a Codex plugin cannot ship subagents, and Codex's default
+`agents.max_depth = 1` stops a subagent from spawning another, which the task
+loop does twice. In a Codex session, run `$gismo:codex-setup`. It checks the
+install and, on your yes, writes each agent as a role file
+`~/.codex/agents/gismo-<name>.toml` (role name `gismo:<name>`, so the prompts
+dispatch it unchanged) and sets `[agents] max_depth = 3` in
+`~/.codex/config.toml`, after a backup. The tiers map to Codex models
+(defaults: haiku → `gpt-5.6-luna`, sonnet → `gpt-5.6-terra`, opus →
+`gpt-5.6-sol`); the check validates them against the models your account
+offers, and `--tier opus=<model>` changes one. Then:
+
+- start a new Codex session, since roles are read at session start;
+- approve the guard in `/hooks`, since Codex runs no plugin hook until it is approved;
+- rerun `$gismo:codex-setup` after each plugin update, since the roles embed the
+  versioned install path.
+
+Known gaps under Codex: there is no native task list (the task files remain the
+record), no `ListAgents`, tool restrictions in the agent definitions are
+instructions rather than enforced limits, and skill text that names
+`${CLAUDE_PLUGIN_ROOT}` relies on the model resolving it, because Codex expands
+it only in hook commands.
 
 ### Via the G+Smo CMake flag (optional)
 
@@ -543,6 +576,7 @@ exist yet; the skills generate them on first use.
 
 ## Scope
 
-gsAgents currently targets **Claude Code only**. GitHub Copilot CLI and OpenCode
+gsAgents targets **Claude Code**, with **OpenAI Codex** supported experimentally
+through `$gismo:codex-setup` (see Installation). GitHub Copilot CLI and OpenCode
 were evaluated and deferred — see `PLUGIN_MIGRATION_BRIEF.md` for the provider
 research and the rationale.
